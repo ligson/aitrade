@@ -18,8 +18,27 @@ pip3 install -r requirements.txt
 | OPENAI_API_KEY     | deepseek api-key  | 是    |
 | SANDBOX_TRADE      | True/False 是否沙箱测试 | 是    |
 
+## 创建虚拟环境
+
+```bash
+python3 -m venv venv
+
+# 激活虚拟环境
+# Windows系统
+venv\Scripts\activate
+# Linux/Mac系统
+source venv/bin/activate
+
+# 退出虚拟环境
+# Windows系统
+venv\Scripts\deactivate
+# Linux/Mac系统
+source venv/bin/deactivate
+ ```
+
 ## 运行
 
 ```bash
 python3 trade.py
 ```
+

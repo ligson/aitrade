@@ -1,4 +1,7 @@
 ccxt==4.4.57
+colorlog==6.10.1
+httpx==0.28.1
 numpy==2.3.4
-openai==2.6.0
+openai==2.6.1
 pandas==2.3.3
+PyYAML==6.0.3
