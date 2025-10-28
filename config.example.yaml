@@ -1,0 +1,10 @@
+app:
+  # gpt接口类型, 可选值: deepseek, openai
+  gpt_provider: deepseek
+  # gpt接口密钥
+  gpt_api_key: sk-xxxxxxxxxxxxxxx
+  # 交易接口类型, 可选值: binance, okx
+  exchange_type: binance
+  # 交易接口密钥
+  exchange_api_key: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  exchange_api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

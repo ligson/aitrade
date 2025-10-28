@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from datetime import datetime
@@ -7,7 +8,7 @@ import ccxt
 import numpy as np
 import pandas as pd
 
-from gpt_signal import get_ai_signal
+from trade.gpt_signal import get_ai_signal
 
 
 def calculate_technical_indicators(closes, highs, lows, volumes):
@@ -189,7 +190,7 @@ class OptimizedCryptoBot:
 
     def run(self):
         """主循环"""
-        print("启动优化版交易机器人...")
+        logging.info("启动优化版交易机器人...")
 
         while True:
             try:
