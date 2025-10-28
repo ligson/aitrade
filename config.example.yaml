@@ -8,3 +8,7 @@ app:
   # 交易接口密钥
   exchange_api_key: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   exchange_api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  # 交易接口代理,不配置默认不启用
+  http_proxy: http://127.0.0.1:10809
+  # 是否沙盒模式, 默认false
+  sandbox_trade: false
