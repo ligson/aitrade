@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import time
 from datetime import datetime
 
@@ -8,6 +7,7 @@ import ccxt
 import numpy as np
 import pandas as pd
 
+import config.config
 from trade.gpt_signal import get_ai_signal
 
 
@@ -96,25 +96,29 @@ def check_market_conditions(volumes, volatility_threshold=0.03):
 
 
 class OptimizedCryptoBot:
-    def __init__(self):
-        config = {
-            'apiKey': os.getenv('BINANCE_API_KEY'),
-            'secret': os.getenv('BINANCE_SECRET_KEY'),
-            'sandbox': bool(os.getenv('SANDBOX_TRADE')),
+    def __init__(self, cfg: config.config.Config):
+        self.config = cfg
+        ccxtCfg = {
+            'apiKey': cfg.exchange_api_key,
+            'secret': cfg.exchange_api_secret,
+            'sandbox': cfg.sandbox_trade,
             'enableRateLimit': True
         }
-        # 检查环境变量中是否有代理设置
-        http_proxy = os.getenv('http_proxy') or os.getenv('HTTP_PROXY')
 
         # 如果环境变量中有代理设置，则使用代理
-        if http_proxy:
-            config['proxies'] = {
-                'http': http_proxy,
-                'https': http_proxy
+        if cfg.proxy_enable:
+            ccxtCfg['proxies'] = {
+                'http': cfg.proxy_url,
+                'https': cfg.proxy_url
             }
-        self.exchange = ccxt.binance(config)
+        if cfg.exchange_type == "binance":
+            self.exchange = ccxt.binance(ccxtCfg)
+        else:
+            self.exchange = ccxt.okx(ccxtCfg)
         self.position = None
         self.trade_log = []
+        logging.info(
+            "交易所类型:" + cfg.exchange_type + ",代理是否启用:" + cfg.proxy_enable + ",代理地址:" + cfg.proxy_url)
 
     def get_enhanced_market_data(self, symbol='BTC/USDT', timeframe='15m', limit=100):
         """获取增强的市场数据"""
@@ -195,26 +199,25 @@ class OptimizedCryptoBot:
         while True:
             try:
                 # 获取市场数据
-                data = self.get_enhanced_market_data()
+                data = self.get_enhanced_market_data(symbol=self.config.trade_symbol,
+                                                     timeframe=self.config.trade_timeframe + 'm',
+                                                     limit=self.config.trade_limit)
 
                 # 获取AI信号
-                signal = get_ai_signal(data)
+                signal = get_ai_signal(self.config, data)
                 print(f"AI信号: {signal}")
 
                 # 执行交易
                 if signal['action'] != 'hold' and signal.get('confidence', 0) > 0.7:
-                    self.execute_trade_with_risk_management('BTC/USDT', signal, data)
+                    self.execute_trade_with_risk_management(self.config.trade_symbol, signal, data)
 
                 # 监控止损
                 if self.position and data['price'] <= self.position['stop_loss']:
                     print("触发止损!")
                     # 执行止损逻辑
 
-                time.sleep(900)  # 15分钟
+                time.sleep(self.config.trade_timeframe * 60)  # 15分钟
 
             except Exception as e:
                 print(f"主循环错误: {e}")
                 time.sleep(60)
-
-
-

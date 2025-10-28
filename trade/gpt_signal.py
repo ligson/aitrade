@@ -4,16 +4,35 @@ import httpx
 import numpy as np
 from openai import OpenAI
 
-client = OpenAI(
-    base_url="https://api.deepseek.com",
-    http_client=httpx.Client(
-        # proxy="http://127.0.0.1:7897",
-        timeout=30.0  # 增加超时时间到30秒
-    )
-)
+import config.config
 
 
-def get_ai_signal(market_data):
+def init_gpt_client(cfg: config.config.Config) -> OpenAI:
+    global client
+    if cfg.proxy_enable:
+        http_client = httpx.Client(
+            proxy=cfg.proxy_url,
+            timeout=30.0  # 增加超时时间到30秒
+        )
+    else:
+        http_client = httpx.Client(
+            timeout=30.0  # 增加超时时间到30秒
+        )
+
+    if cfg.gpt_provider == 'deepseek':
+        client = OpenAI(
+            base_url="https://api.deepseek.com",
+            http_client=http_client
+        )
+    if cfg.gpt_provider == 'openai':
+        client = OpenAI(
+            http_client=http_client
+        )
+    return client
+
+
+def get_ai_signal(cfg: config.config.Config, market_data):
+    gpt_client = init_gpt_client(cfg)
     """完善的AI信号生成函数"""
     try:
         # 提取技术指标数据
@@ -40,7 +59,7 @@ def get_ai_signal(market_data):
         prompt = build_analysis_prompt(market_data, technical_analysis, market_context)
 
         # 调用AI模型
-        response = client.chat.completions.create(model="deepseek-chat",
+        response = gpt_client.chat.completions.create(model="deepseek-chat",
                                                   messages=[
                                                       {
                                                           "role": "system",

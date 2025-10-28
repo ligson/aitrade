@@ -1,14 +1,26 @@
 app:
-  # gpt接口类型, 可选值: deepseek, openai
-  gpt_provider: deepseek
-  # gpt接口密钥
-  gpt_api_key: sk-xxxxxxxxxxxxxxx
-  # 交易接口类型, 可选值: binance, okx
-  exchange_type: binance
-  # 交易接口密钥
-  exchange_api_key: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  exchange_api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  # 交易接口代理,不配置默认不启用
-  http_proxy: http://127.0.0.1:10809
-  # 是否沙盒模式, 默认false
-  sandbox_trade: false
+  gpt:
+    # gpt接口类型, 可选值: deepseek, openai
+    provider: deepseek
+    # gpt接口密钥
+    api_key: sk-xxxxxxxxxxxxxxx
+  exchange:
+    # 交易接口类型, 可选值: binance, okx
+    type: binance
+    api_key: xxxx
+    # 交易接口密钥
+    api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  http_client:
+    # 交易接口代理,不配置默认不启用
+    proxy_enable: true
+    # 代理地址
+    proxy_url: http://127.0.0.1:10809
+  trade:
+    # 是否沙盒模式, 默认True
+    sandbox_trade: true
+    # 交易对,默认BTC/USDT
+    symbol: BTC/USDT
+    # 交易时间间隔,默认15分钟
+    timeframe: 15
+    # 交易数据个数,默认100
+    limit: 100
