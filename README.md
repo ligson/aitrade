@@ -34,6 +34,6 @@ source venv/bin/deactivate
 ## 运行
 
 ```bash
-python3 main.py
+python -m aitrade
 ```
 
