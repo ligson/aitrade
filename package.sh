@@ -18,6 +18,7 @@ PACKAGE_NAME="dist/aitrade_source_${TIMESTAMP}.zip"
 echo "🚀 开始打包源码到 dist 目录..."
 
 cp -r aitrade temp_package/aitrade/
+cp *.sh temp_package/aitrade/
 cp requirements.txt temp_package/aitrade/
 cp config.example.yaml temp_package/aitrade/
 cp README.md temp_package/aitrade/ 2>/dev/null || echo "README.md not found"
