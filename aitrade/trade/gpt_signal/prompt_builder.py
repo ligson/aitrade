@@ -1,10 +1,31 @@
+import logging
+
+
 class PromptBuilder:
-    """AI提示词构建器"""
+    """AI提示词构建器
+    
+    负责构建发送给AI模型的提示词，将技术分析和市场环境数据
+    格式化为AI模型易于理解的文本格式。
+    """
 
     @staticmethod
     def build_analysis_prompt(market_data, technical_analysis, market_context):
-        """构建分析提示词"""
-
+        """构建分析提示词
+        
+        将市场数据、技术分析结果和市场环境评估整合成
+        结构化的提示词，引导AI模型进行交易决策分析。
+        
+        Args:
+            market_data (dict): 市场数据字典
+            technical_analysis (dict): 技术分析结果
+            market_context (dict): 市场环境评估结果
+            
+        Returns:
+            str: 构建完成的提示词字符串
+        """
+        logging.info("开始构建AI分析提示词")
+        
+        # 构建完整的分析提示词
         prompt = f"""
         请基于以下市场数据提供专业的交易分析：
 
@@ -61,4 +82,5 @@ class PromptBuilder:
         }}
         """
 
+        logging.debug("AI分析提示词构建完成")
         return prompt

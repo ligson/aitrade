@@ -27,7 +27,7 @@ def config_log():
 
     # 创建 ColorFormatter 实例，设置不同级别日志的颜色
     formatter = colorlog.ColoredFormatter(
-        '%(log_color)s%(asctime)s%(reset)s-[%(log_color)s%(levelname)s%(reset)s]-%(yellow)s%(filename)s%(reset)s: %(white)s%(message)s',
+        '%(log_color)s%(asctime)s%(reset)s-[%(log_color)s%(levelname)s%(reset)s]-%(yellow)s%(filename)s%(reset)s ==> %(white)s%(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         log_colors={
             'DEBUG': 'cyan',
