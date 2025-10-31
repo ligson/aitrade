@@ -48,6 +48,7 @@ class TradingBot:
             exchange_type=config.exchange_type,
             api_key=config.exchange_api_key,
             secret=config.exchange_api_secret,
+            password=config.exchange_password,  # 添加OKX密码参数
             sandbox=config.trade_sandbox_trade,
             proxies={'http': config.proxy_url, 'https': config.proxy_url} if config.proxy_enable else None
         )
@@ -58,6 +59,7 @@ class TradingBot:
             exchange_type=config.exchange_type,
             api_key=config.exchange_api_key,
             secret=config.exchange_api_secret,
+            password=config.exchange_password,  # 添加OKX密码参数
             sandbox=config.trade_sandbox_trade,
             proxies={'http': config.proxy_url, 'https': config.proxy_url} if config.proxy_enable else None
         )
@@ -157,8 +159,9 @@ class TradingBot:
                 # 监控止损
                 position = self.trade_executor.get_position()
                 if position and data['price'] <= position['stop_loss']:
-                    logging.warning("触发止损条件!")
-                    # TODO: 执行止损逻辑
+                    logging.warning(f"触发止损条件! 当前价格: {data['price']}, 止损价格: {position['stop_loss']}")
+                    # 执行止损逻辑
+                    self._execute_stop_loss(position, data)
 
                 # 等待下一个周期
                 sleep_time = self.config.trade_timeframe * 60
@@ -170,3 +173,40 @@ class TradingBot:
                 # 发生错误时等待1分钟后继续
                 logging.info("等待60秒后重试...")
                 time.sleep(60)
+
+    def _execute_stop_loss(self, position, market_data):
+        """
+        执行止损操作
+        
+        当市场价格触及止损线时，立即执行卖出操作以控制风险。
+        
+        Args:
+            position: 当前持仓信息，包含入场价、止损价和持仓数量
+            market_data: 当前市场数据，包含最新价格等信息
+        """
+        try:
+            logging.info("开始执行止损操作")
+            
+            # 创建市价卖出订单
+            stop_loss_signal = {
+                'action': 'sell',
+                'confidence': 1.0,
+                'reason': '止损触发',
+                'stop_loss_pct': 0.0,  # 止损操作不需要额外的止损设置
+                'take_profit_pct': 0.0
+            }
+            
+            # 使用现有的交易执行方法执行止损
+            self.trade_executor.execute_trade_with_risk_management(
+                self.config.trade_symbol,
+                stop_loss_signal,
+                market_data,
+                self.risk_manager
+            )
+            
+            logging.info("止损操作执行完成")
+            
+        except Exception as e:
+            logging.exception(f"止损执行失败: {e}")
+            # 如果止损执行失败，记录错误但不改变持仓状态
+            # 这样可以在下一个周期再次尝试执行止损

@@ -1,4 +1,4 @@
-ccxt==4.4.57
+ccxt==4.5.14
 colorlog==6.10.1
 httpx==0.28.1
 numpy==2.3.4

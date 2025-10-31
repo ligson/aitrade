@@ -41,6 +41,20 @@ def config_log():
 
     console_handler.setFormatter(formatter)
 
+    # 创建专门用于交易日志的处理器
+    trade_log_file = datetime.datetime.now().strftime("trade_%Y-%m-%d-%H.log")
+    trade_logout = os.path.join(log_dir, trade_log_file)
+    trade_file_handler = TimedRotatingFileHandler(trade_logout, when="H", interval=1, backupCount=72)
+    trade_file_handler.setFormatter(logging.Formatter('%(asctime)s-[%(levelname)s]-%(filename)s: %(message)s'))
+    trade_file_handler.setLevel(logging.INFO)
+    
+    # 创建交易日志记录器并添加处理器
+    trade_logger = logging.getLogger('trade')
+    trade_logger.addHandler(trade_file_handler)
+    trade_logger.setLevel(logging.INFO)
+    # 防止传播到根日志记录器，避免重复记录
+    trade_logger.propagate = False
+
     # 创建日志记录器并添加处理器
     logger = logging.getLogger('')
     logger.addHandler(file_handler)

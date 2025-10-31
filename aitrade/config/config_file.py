@@ -40,6 +40,8 @@ class Config:
         self.exchange_type = exchange_cfg.get('type')
         self.exchange_api_key = exchange_cfg.get('api_key')
         self.exchange_api_secret = exchange_cfg.get('api_secret')
+        # OKX交易所需要的密码参数
+        self.exchange_password = exchange_cfg.get('password', '')
 
         # --- Trade (交易) 配置 ---
         trade_cfg = app_cfg.get('trade', {})

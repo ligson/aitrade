@@ -16,7 +16,7 @@ class MarketDataFetcher:
         exchange: CCXT交易所实例
     """
 
-    def __init__(self, exchange_type: str, api_key: str, secret: str, sandbox: bool = True, proxies: Dict[str, str] = None):
+    def __init__(self, exchange_type: str, api_key: str, secret: str, password: str = '', sandbox: bool = True, proxies: Dict[str, str] = None):
         """
         初始化市场数据获取器
         
@@ -24,11 +24,12 @@ class MarketDataFetcher:
             exchange_type (str): 交易所类型 ('binance', 'okx')
             api_key (str): API密钥
             secret (str): API密钥
+            password (str): OKX交易所需要的密码参数
             sandbox (bool): 是否使用沙盒模式，默认为True
             proxies (Dict[str, str], optional): 代理设置
             
         Example:
-            >>> fetcher = MarketDataFetcher('binance', 'your_api_key', 'your_secret', True)
+            >>> fetcher = MarketDataFetcher('binance', 'your_api_key', 'your_secret', '', True)
         """
         ccxt_cfg = {
             'apiKey': api_key,
@@ -36,6 +37,10 @@ class MarketDataFetcher:
             'sandbox': sandbox,
             'enableRateLimit': True
         }
+
+        # OKX交易所需要密码参数
+        if exchange_type == "okx" and password:
+            ccxt_cfg['password'] = password
 
         if proxies:
             ccxt_cfg['proxies'] = proxies
@@ -77,6 +82,13 @@ class MarketDataFetcher:
         """
         try:
             logging.debug(f"获取 {symbol} 的 {timeframe} OHLCV数据，条数: {limit}")
+            # 验证交易对是否在市场列表中
+            if symbol not in self.exchange.markets:
+                available_symbols = list(self.exchange.markets.keys())
+                logging.warning(f"交易对 {symbol} 不在可用市场列表中，可用交易对数量: {len(available_symbols)}")
+                if available_symbols:
+                    logging.debug(f"部分可用交易对示例: {available_symbols[:10]}")
+            
             data = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
             logging.info(f"成功获取 {len(data)} 条OHLCV数据")
             return data

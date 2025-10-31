@@ -18,7 +18,7 @@ class TradeExecutor:
         trade_log: 交易日志列表
     """
 
-    def __init__(self, exchange_type: str, api_key: str, secret: str, sandbox: bool = True,
+    def __init__(self, exchange_type: str, api_key: str, secret: str, password: str = '', sandbox: bool = True,
                  proxies: Dict[str, str] = None):
         """
         初始化交易执行器
@@ -27,11 +27,12 @@ class TradeExecutor:
             exchange_type (str): 交易所类型 ('binance', 'okx')
             api_key (str): API密钥
             secret (str): API密钥
+            password (str): OKX交易所需要的密码参数
             sandbox (bool): 是否使用沙盒模式，默认为True
             proxies (Dict[str, str], optional): 代理设置
             
         Example:
-            >>> executor = TradeExecutor('binance', 'your_api_key', 'your_secret', True)
+            >>> executor = TradeExecutor('binance', 'your_api_key', 'your_secret', '', True)
         """
         ccxt_cfg = {
             'apiKey': api_key,
@@ -39,6 +40,10 @@ class TradeExecutor:
             'sandbox': sandbox,
             'enableRateLimit': True
         }
+
+        # OKX交易所需要密码参数
+        if exchange_type == "okx" and password:
+            ccxt_cfg['password'] = password
 
         if proxies:
             ccxt_cfg['proxies'] = proxies
@@ -54,6 +59,8 @@ class TradeExecutor:
         # 初始化持仓和交易日志
         self.position = None
         self.trade_log = []
+        # 初始化专门的交易日志记录器
+        self.trade_logger = logging.getLogger('trade')
         logging.debug("交易执行器初始化完成")
 
     def execute_trade_with_risk_management(self, symbol: str, signal: Dict[str, Any], data: Dict[str, Any],
@@ -85,7 +92,7 @@ class TradeExecutor:
         try:
             # 获取账户余额
             balance = self.exchange.fetch_balance()
-            usdt_balance = balance['total']['USDT']
+            usdt_balance = balance['total'].get('USDT', 0)
             
             logging.info(f"账户USDT余额: {usdt_balance}")
 
@@ -102,8 +109,15 @@ class TradeExecutor:
 
                 # 加载市场信息以获取最小交易量限制
                 markets = self.exchange.load_markets()
+                if symbol not in markets:
+                    logging.error(f"交易对 {symbol} 不在交易所市场列表中")
+                    available_symbols = list(markets.keys())
+                    if available_symbols:
+                        logging.debug(f"部分可用交易对示例: {available_symbols[:10]}")
+                    return
+                    
                 market = markets[symbol]
-                min_amount = market['limits']['amount']['min']
+                min_amount = market['limits']['amount']['min'] if 'min' in market['limits']['amount'] else 0
                 # 确保交易数量不低于最小限制
                 amount = max(amount, min_amount)
                 
@@ -157,14 +171,16 @@ class TradeExecutor:
             'timestamp': datetime.now().isoformat(),
             'action': action,
             'signal': signal,
-            'order_id': order['id'],
-            'price': order['price'],
-            'amount': order['amount']
+            'order_id': order.get('id', 'unknown'),
+            'price': order.get('price', 'unknown'),
+            'amount': order.get('amount', 'unknown')
         }
         # 添加到交易日志列表
         self.trade_log.append(log_entry)
-        # 输出到日志
+        # 输出到常规日志
         logging.info(f"交易日志: {json.dumps(log_entry, indent=2, ensure_ascii=False)}")
+        # 输出到专门的交易日志
+        self.trade_logger.info(f"交易成功: {json.dumps(log_entry, indent=2, ensure_ascii=False)}")
 
     def get_position(self) -> Dict[str, Any]:
         """

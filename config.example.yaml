@@ -10,6 +10,8 @@ app:
     api_key: xxxx
     # 交易接口密钥
     api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    # OKX交易所需要的密码（仅在使用OKX时需要配置）
+    password: your_okx_password
   http_client:
     # 交易接口代理,不配置默认不启用
     proxy_enable: true
