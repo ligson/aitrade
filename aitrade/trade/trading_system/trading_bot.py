@@ -1,6 +1,7 @@
 import logging
 import time
 
+from config import config_file
 from .market_data_fetcher import MarketDataFetcher
 from .risk_manager import RiskManager
 from .trade_executor import TradeExecutor
@@ -9,16 +10,16 @@ from ..gpt_signal import SignalGenerator
 
 class TradingBot:
     """主交易机器人控制器
-    
+
     协调整个交易系统的各个组件，包括市场数据获取、AI信号生成、
     风险管理和交易执行。
-    
+
     该类是整个交易系统的核心，负责：
     1. 初始化所有子组件
     2. 运行主交易循环
     3. 协调各组件间的数据流
     4. 处理异常和错误
-    
+
     Attributes:
         config: 配置对象
         market_data_fetcher: 市场数据获取器实例
@@ -27,15 +28,15 @@ class TradingBot:
         signal_generator: 信号生成器实例
     """
 
-    def __init__(self, config):
+    def __init__(self, config: config_file.Config):
         """
         初始化交易机器人
-        
+
         根据配置初始化所有子组件，包括交易所连接、AI服务等。
 
         Args:
             config: 配置对象，包含所有必要的配置参数
-            
+
         Example:
             >>> bot = TradingBot(config)
             >>> bot.run()
@@ -79,13 +80,13 @@ class TradingBot:
     def _init_gpt_signal_generator(self) -> SignalGenerator:
         """
         初始化GPT信号生成器
-        
+
         根据配置中的gpt_provider字段选择合适的AI服务提供商。
         支持DeepSeek和OpenAI两种提供商。
 
         Returns:
             SignalGenerator实例
-            
+
         Example:
             >>> signal_gen = bot._init_gpt_signal_generator()
         """
@@ -100,21 +101,21 @@ class TradingBot:
             # 默认使用DeepSeek
             base_url = "https://api.deepseek.com/v1"
             logging.warning(f"未知的AI服务提供商: {self.config.gpt_provider}，默认使用DeepSeek")
-        
+
         # 初始化信号生成器
         signal_generator = SignalGenerator(
             api_key=self.config.gpt_api_key,
             base_url=base_url,
             proxy_url=self.config.proxy_url if self.config.proxy_enable else None
         )
-        
+
         logging.info("GPT信号生成器初始化完成")
         return signal_generator
 
     def run(self) -> None:
         """
         运行交易机器人主循环
-        
+
         这是交易机器人的核心方法，执行以下步骤：
         1. 获取市场数据
         2. 生成交易信号
@@ -122,7 +123,7 @@ class TradingBot:
         4. 执行交易
         5. 监控止损
         6. 等待下一个周期
-        
+
         该循环会一直运行直到程序被手动终止。
         """
         logging.info("启动交易机器人主循环...")
@@ -130,7 +131,7 @@ class TradingBot:
         while True:
             try:
                 logging.info("开始新的交易周期")
-                
+
                 # 获取市场数据
                 data = self.market_data_fetcher.get_enhanced_market_data(
                     symbol=self.config.trade_symbol,
@@ -177,16 +178,16 @@ class TradingBot:
     def _execute_stop_loss(self, position, market_data):
         """
         执行止损操作
-        
+
         当市场价格触及止损线时，立即执行卖出操作以控制风险。
-        
+
         Args:
             position: 当前持仓信息，包含入场价、止损价和持仓数量
             market_data: 当前市场数据，包含最新价格等信息
         """
         try:
             logging.info("开始执行止损操作")
-            
+
             # 创建市价卖出订单
             stop_loss_signal = {
                 'action': 'sell',
@@ -195,7 +196,7 @@ class TradingBot:
                 'stop_loss_pct': 0.0,  # 止损操作不需要额外的止损设置
                 'take_profit_pct': 0.0
             }
-            
+
             # 使用现有的交易执行方法执行止损
             self.trade_executor.execute_trade_with_risk_management(
                 self.config.trade_symbol,
@@ -203,9 +204,9 @@ class TradingBot:
                 market_data,
                 self.risk_manager
             )
-            
+
             logging.info("止损操作执行完成")
-            
+
         except Exception as e:
             logging.exception(f"止损执行失败: {e}")
             # 如果止损执行失败，记录错误但不改变持仓状态
