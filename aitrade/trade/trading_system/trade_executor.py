@@ -139,6 +139,8 @@ class TradeExecutor:
 
             # 卖出操作
             elif signal['action'] == 'sell' and self.position:
+                # 保存持仓数量用于日志输出，因为后续会清空持仓
+                position_amount = self.position['amount']
                 # 创建市价卖单
                 order = self.exchange.create_order(
                     symbol, 'market', 'sell', self.position['amount']
@@ -147,7 +149,7 @@ class TradeExecutor:
                 self._log_trade(signal, order, 'SELL_EXECUTED')
                 # 清空持仓
                 self.position = None
-                logging.info(f"卖单执行成功 - 价格: {data['price']}, 数量: {self.position['amount']}")
+                logging.info(f"卖单执行成功 - 价格: {data['price']}, 数量: {position_amount}")
             else:
                 logging.info("不满足交易条件，跳过交易执行")
 

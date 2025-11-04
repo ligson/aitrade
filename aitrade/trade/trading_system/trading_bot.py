@@ -188,6 +188,11 @@ class TradingBot:
         try:
             logging.info("开始执行止损操作")
 
+            # 检查是否有持仓
+            if position is None:
+                logging.warning("无有效持仓，跳过止损执行")
+                return
+
             # 创建市价卖出订单
             stop_loss_signal = {
                 'action': 'sell',
