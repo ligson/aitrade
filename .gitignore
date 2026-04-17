@@ -208,3 +208,6 @@ __marimo__/
 .idea/
 logs/
 config.yaml
+.aitrade/
+aitrade.pid
+trade.log

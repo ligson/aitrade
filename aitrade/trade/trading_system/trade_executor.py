@@ -1,212 +1,158 @@
+import json
 import logging
+from datetime import datetime
+from typing import Any, Dict
 
 import ccxt
-import json
-from datetime import datetime
-from typing import Dict, Any
 
 
 class TradeExecutor:
-    """交易执行器
-    
-    负责执行交易订单，管理持仓和交易日志。
-    支持多种交易所和代理设置。
-    
-    Attributes:
-        exchange: CCXT交易所实例
-        position: 当前持仓信息
-        trade_log: 交易日志列表
-    """
+    """交易执行器。"""
 
-    def __init__(self, exchange_type: str, api_key: str, secret: str, password: str = '', sandbox: bool = True,
-                 proxies: Dict[str, str] = None):
-        """
-        初始化交易执行器
-
-        Args:
-            exchange_type (str): 交易所类型 ('binance', 'okx')
-            api_key (str): API密钥
-            secret (str): API密钥
-            password (str): OKX交易所需要的密码参数
-            sandbox (bool): 是否使用沙盒模式，默认为True
-            proxies (Dict[str, str], optional): 代理设置
-            
-        Example:
-            >>> executor = TradeExecutor('binance', 'your_api_key', 'your_secret', '', True)
-        """
+    def __init__(self, exchange_type: str, api_key: str, secret: str, password: str = '', sandbox: bool = True, proxies: Dict[str, str] = None):
         ccxt_cfg = {
             'apiKey': api_key,
             'secret': secret,
-            'sandbox': sandbox,
-            'enableRateLimit': True
+            'enableRateLimit': True,
         }
 
-        # OKX交易所需要密码参数
         if exchange_type == "okx" and password:
             ccxt_cfg['password'] = password
 
         if proxies:
             ccxt_cfg['proxies'] = proxies
 
-        # 根据交易所类型初始化相应的交易所实例
         if exchange_type == "binance":
+            ccxt_cfg['options'] = {
+                'defaultType': 'spot',
+                'fetchMarkets': {
+                    'types': ['spot'],
+                },
+            }
             self.exchange = ccxt.binance(ccxt_cfg)
-            logging.info(f"初始化Binance交易所用于交易执行，沙盒模式: {sandbox}")
+            logging.info("初始化Binance交易所用于交易执行，沙盒模式: %s", sandbox)
         else:
             self.exchange = ccxt.okx(ccxt_cfg)
-            logging.info(f"初始化OKX交易所用于交易执行，沙盒模式: {sandbox}")
+            logging.info("初始化OKX交易所用于交易执行，沙盒模式: %s", sandbox)
 
-        # 初始化持仓和交易日志
+        if sandbox and hasattr(self.exchange, 'set_sandbox_mode'):
+            self.exchange.set_sandbox_mode(True)
+
         self.position = None
         self.trade_log = []
-        # 初始化专门的交易日志记录器
         self.trade_logger = logging.getLogger('trade')
         logging.debug("交易执行器初始化完成")
 
-    def execute_trade_with_risk_management(self, symbol: str, signal: Dict[str, Any], data: Dict[str, Any],
-                                           risk_manager) -> None:
-        """
-        带风险管理的交易执行
-        
-        根据交易信号和市场数据执行交易，并应用风险管理规则。
-        这是交易执行的核心方法，整合了信号分析、风险管理和订单执行。
+    def execute_trade_with_risk_management(self, symbol: str, signal: Dict[str, Any], data: Dict[str, Any], risk_manager) -> None:
+        logging.info("开始执行交易 - 信号: %s, 置信度: %.2f, 策略: %s", signal['action'], signal.get('confidence', 0), signal.get('strategy', 'unknown'))
 
-        Args:
-            symbol (str): 交易对，例如 'BTC/USDT'
-            signal (Dict[str, Any]): 交易信号，包含操作建议和置信度等信息
-            data (Dict[str, Any]): 市场数据，包含价格和各种技术指标
-            risk_manager: 风险管理器实例
-            
-        Example:
-            >>> market_data = fetcher.get_enhanced_market_data()
-            >>> signal = generator.get_ai_signal(market_data)
-            >>> executor.execute_trade_with_risk_management('BTC/USDT', signal, market_data, risk_manager)
-        """
-        logging.info(f"开始执行交易 - 信号: {signal['action']}, 置信度: {signal.get('confidence', 0):.2f}")
-        
-        # 进行风险检查
-        if not risk_manager.risk_management_check(data, signal['action']):
+        if not risk_manager.risk_management_check(data, signal):
             logging.warning("风控检查未通过，取消交易")
             return
 
         try:
-            # 获取账户余额
             balance = self.exchange.fetch_balance()
             usdt_balance = balance['total'].get('USDT', 0)
-            
-            logging.info(f"账户USDT余额: {usdt_balance}")
+            logging.info("账户USDT余额: %s", usdt_balance)
 
-            # 买入操作
             if signal['action'] == 'buy' and usdt_balance > 10:
-                # 计算交易数量
+                stop_loss_pct = self._resolve_stop_loss_pct(signal, data)
                 amount = risk_manager.calculate_position_size(
                     usdt_balance,
-                    risk_per_trade=0.02,
-                    stop_loss_pct=signal.get('stop_loss_pct', 0.05)
+                    risk_per_trade=signal.get('risk_per_trade', 0.02),
+                    stop_loss_pct=stop_loss_pct,
                 ) / data['price']
-                
-                logging.info(f"计算交易数量: {amount}")
+                logging.info("计算交易数量: %s", amount)
 
-                # 加载市场信息以获取最小交易量限制
                 markets = self.exchange.load_markets()
                 if symbol not in markets:
-                    logging.error(f"交易对 {symbol} 不在交易所市场列表中")
+                    logging.error("交易对 %s 不在交易所市场列表中", symbol)
                     available_symbols = list(markets.keys())
                     if available_symbols:
-                        logging.debug(f"部分可用交易对示例: {available_symbols[:10]}")
+                        logging.debug("部分可用交易对示例: %s", available_symbols[:10])
                     return
-                    
+
                 market = markets[symbol]
                 min_amount = market['limits']['amount']['min'] if 'min' in market['limits']['amount'] else 0
-                # 确保交易数量不低于最小限制
                 amount = max(amount, min_amount)
-                
-                logging.info(f"调整后交易数量: {amount} (最小: {min_amount})")
+                logging.info("调整后交易数量: %s (最小: %s)", amount, min_amount)
 
-                # 创建市价买单
-                order = self.exchange.create_order(
-                    symbol, 'market', 'buy', amount
-                )
-                # 更新持仓信息
+                order = self.exchange.create_order(symbol, 'market', 'buy', amount)
+                stop_loss_price = signal.get('stop_loss_price', data['price'] * (1 - stop_loss_pct))
+                trailing_stop_price = signal.get('trailing_stop_price')
                 self.position = {
                     'entry_price': data['price'],
-                    'stop_loss': data['price'] * (1 - signal['stop_loss_pct']),
-                    'amount': amount
+                    'stop_loss': stop_loss_price,
+                    'initial_stop_loss': stop_loss_price,
+                    'trailing_stop_price': trailing_stop_price,
+                    'highest_price': data['price'],
+                    'highest_close': data['price'],
+                    'amount': amount,
+                    'strategy': signal.get('strategy'),
+                    'meta': signal.get('meta', {}),
                 }
-                # 记录交易日志
                 self._log_trade(signal, order, 'BUY_EXECUTED')
-                logging.info(f"买单执行成功 - 价格: {data['price']}, 数量: {amount}")
+                logging.info("买单执行成功 - 价格: %s, 数量: %s", data['price'], amount)
 
-            # 卖出操作
             elif signal['action'] == 'sell' and self.position:
-                # 保存持仓数量用于日志输出，因为后续会清空持仓
                 position_amount = self.position['amount']
-                # 创建市价卖单
-                order = self.exchange.create_order(
-                    symbol, 'market', 'sell', self.position['amount']
-                )
-                # 记录交易日志
+                order = self.exchange.create_order(symbol, 'market', 'sell', position_amount)
                 self._log_trade(signal, order, 'SELL_EXECUTED')
-                # 清空持仓
                 self.position = None
-                logging.info(f"卖单执行成功 - 价格: {data['price']}, 数量: {position_amount}")
+                logging.info("卖单执行成功 - 价格: %s, 数量: %s", data['price'], position_amount)
             else:
                 logging.info("不满足交易条件，跳过交易执行")
 
         except Exception as e:
-            logging.error(f"交易执行错误: {e}")
+            logging.error("交易执行错误: %s", e)
             raise
 
-    def _log_trade(self, signal: Dict[str, Any], order: Dict[str, Any], action: str) -> None:
-        """
-        交易日志
-        
-        记录交易执行的详细信息到日志和交易日志列表。
+    def update_position_risk(self, stop_loss=None, trailing_stop_price=None, market_price=None, meta=None) -> None:
+        if not self.position:
+            return
 
-        Args:
-            signal (Dict[str, Any]): 交易信号
-            order (Dict[str, Any]): 订单信息
-            action (str): 操作类型
-        """
-        # 构建日志条目
+        if market_price is not None:
+            self.position['highest_price'] = max(self.position.get('highest_price', market_price), market_price)
+            self.position['highest_close'] = max(self.position.get('highest_close', market_price), market_price)
+
+        if stop_loss is not None:
+            current_stop_loss = self.position.get('stop_loss')
+            if current_stop_loss is None or stop_loss > current_stop_loss:
+                self.position['stop_loss'] = stop_loss
+
+        if trailing_stop_price is not None:
+            self.position['trailing_stop_price'] = trailing_stop_price
+
+        if meta:
+            merged_meta = dict(self.position.get('meta', {}))
+            merged_meta.update(meta)
+            self.position['meta'] = merged_meta
+
+        logging.info("持仓风控信息已更新: %s", self.position)
+
+    def _resolve_stop_loss_pct(self, signal: Dict[str, Any], data: Dict[str, Any]) -> float:
+        if signal.get('stop_loss_price') is not None:
+            stop_loss_price = signal['stop_loss_price']
+            return max((data['price'] - stop_loss_price) / data['price'], 1e-6)
+        return max(signal.get('stop_loss_pct', 0.05), 1e-6)
+
+    def _log_trade(self, signal: Dict[str, Any], order: Dict[str, Any], action: str) -> None:
         log_entry = {
             'timestamp': datetime.now().isoformat(),
             'action': action,
             'signal': signal,
             'order_id': order.get('id', 'unknown'),
             'price': order.get('price', 'unknown'),
-            'amount': order.get('amount', 'unknown')
+            'amount': order.get('amount', 'unknown'),
         }
-        # 添加到交易日志列表
         self.trade_log.append(log_entry)
-        # 输出到常规日志
-        logging.info(f"交易日志: {json.dumps(log_entry, indent=2, ensure_ascii=False)}")
-        # 输出到专门的交易日志
-        self.trade_logger.info(f"交易成功: {json.dumps(log_entry, indent=2, ensure_ascii=False)}")
+        logging.info("交易日志: %s", json.dumps(log_entry, indent=2, ensure_ascii=False))
+        self.trade_logger.info("交易成功: %s", json.dumps(log_entry, indent=2, ensure_ascii=False))
 
     def get_position(self) -> Dict[str, Any]:
-        """
-        获取当前持仓
-        
-        Returns:
-            Dict[str, Any]: 当前持仓信息，如果没有持仓则返回None
-            
-        Example:
-            >>> position = executor.get_position()
-            >>> if position: print(f"当前持仓: {position}")
-        """
-        logging.debug(f"获取当前持仓: {self.position}")
+        logging.debug("获取当前持仓: %s", self.position)
         return self.position
 
     def set_position(self, position: Dict[str, Any]) -> None:
-        """
-        设置持仓
-        
-        Args:
-            position (Dict[str, Any]): 持仓信息
-            
-        Example:
-            >>> executor.set_position({'entry_price': 50000, 'stop_loss': 49000, 'amount': 0.1})
-        """
         self.position = position
-        logging.info(f"持仓已更新: {position}")
+        logging.info("持仓已更新: %s", position)

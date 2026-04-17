@@ -1,50 +1,56 @@
 #!/bin/bash
-# 源码打包脚本
+set -euo pipefail
 
-# 创建临时目录结构
-mkdir -p temp_package/aitrade
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIST_DIR="$ROOT_DIR/dist"
+PROJECT_NAME="aitrade"
+TIMESTAMP="$(date +"%Y%m%d_%H%M%S")"
+ARCHIVE_BASENAME="${PROJECT_NAME}_source_${TIMESTAMP}"
+STAGING_DIR="$DIST_DIR/.${ARCHIVE_BASENAME}"
+ARCHIVE_PATH="$DIST_DIR/${ARCHIVE_BASENAME}.tar.gz"
 
-# 创建dist目录（如果不存在）
-if [ ! -d "dist" ]; then
-  mkdir dist
-else
-  rm -rf dist/*
+log() {
+    printf '[package] %s\n' "$1"
+}
+
+cleanup() {
+    rm -rf "$STAGING_DIR"
+}
+
+trap cleanup EXIT
+
+mkdir -p "$DIST_DIR"
+rm -rf "$STAGING_DIR"
+mkdir -p "$STAGING_DIR/$PROJECT_NAME"
+
+log "开始准备源码包内容"
+cp -R "$ROOT_DIR/aitrade" "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR"/*.sh "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR/requirements.txt" "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR/config.example.yaml" "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR/README.md" "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR/CHANGELOG.md" "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR/CLAUDE.md" "$STAGING_DIR/$PROJECT_NAME/"
+
+if [ -f "$ROOT_DIR/.python-version" ]; then
+    cp "$ROOT_DIR/.python-version" "$STAGING_DIR/$PROJECT_NAME/"
 fi
 
-# 获取当前时间戳
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-PACKAGE_NAME="dist/aitrade_source_${TIMESTAMP}.zip"
+log "生成 tar.gz 压缩包"
+tar \
+    --exclude='__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='*.pyo' \
+    --exclude='*.log' \
+    --exclude='config.yaml' \
+    --exclude='venv' \
+    --exclude='dist' \
+    -czf "$ARCHIVE_PATH" \
+    -C "$STAGING_DIR" \
+    "$PROJECT_NAME"
 
-echo "🚀 开始打包源码到 dist 目录..."
+FILE_SIZE=$(stat -f%z "$ARCHIVE_PATH" 2>/dev/null || stat -c%s "$ARCHIVE_PATH")
 
-cp -r aitrade temp_package/aitrade/
-cp *.sh temp_package/aitrade/
-cp requirements.txt temp_package/aitrade/
-cp config.example.yaml temp_package/aitrade/
-cp README.md temp_package/aitrade/ 2>/dev/null || echo "README.md not found"
-
-# 创建源码包，排除不必要的文件
-cd temp_package
-zip -r "../${PACKAGE_NAME}" \
-    aitrade \
-    -x "*.pyc" \
-    "*__pycache__*" \
-    "*.git*" \
-    "*venv*" \
-    "*.log" \
-    "aitrade/dist/*" \
-    "aitrade/build/*" \
-    "aitrade/*.egg-info*" \
-    "aitrade/package.sh" \
-    "aitrade/config.yaml"
-
-cd ..
-# 清理临时目录
-rm -rf temp_package
-
-# 获取文件大小
-FILE_SIZE=$(stat -c%s "$PACKAGE_NAME" 2>/dev/null || stat -f%z "$PACKAGE_NAME" 2>/dev/null)
-
-echo "✅ 源码包创建完成: $PACKAGE_NAME ($FILE_SIZE bytes)"
-echo "📦 包内文件结构:"
-unzip -l "$PACKAGE_NAME" | head -20
+log "源码包创建完成: $ARCHIVE_PATH ($FILE_SIZE bytes)"
+log "包内文件预览:"
+tar -tzf "$ARCHIVE_PATH" | head -20

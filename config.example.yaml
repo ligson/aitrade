@@ -4,6 +4,8 @@ app:
     provider: deepseek
     # gpt接口密钥
     api_key: sk-xxxxxxxxxxxxxxx
+    # 模型名称, 默认 deepseek-chat
+    model: deepseek-chat
   exchange:
     # 交易接口类型, 可选值: binance, okx
     type: binance
@@ -14,7 +16,7 @@ app:
     password: your_okx_password
   http_client:
     # 交易接口代理,不配置默认不启用
-    proxy_enable: true
+    proxy_enable: false
     # 代理地址
     proxy_url: http://127.0.0.1:10809
   trade:
@@ -26,3 +28,36 @@ app:
     timeframe: 15
     # 交易数据个数,默认100
     limit: 100
+    strategy:
+      # 可选值: gpt, btc_spot_breakout
+      type: gpt
+      gpt:
+        # GPT策略最低置信度阈值
+        min_confidence: 0.7
+      btc_spot_breakout:
+        # Donchian突破入场窗口
+        donchian_entry: 20
+        # Donchian跌破出场窗口
+        donchian_exit: 10
+        # 趋势过滤EMA周期，15分钟下 96 约等于1天
+        ema_period: 96
+        # EMA斜率回看根数
+        ema_slope_lookback: 4
+        # ATR周期
+        atr_period: 14
+        # 初始止损ATR倍数
+        atr_stop_mult: 2.5
+        # 追踪止损ATR倍数
+        atr_trail_mult: 3.0
+        # 突破缓冲，单位 bps
+        breakout_buffer_bps: 10
+        # 是否要求MACD柱线大于0
+        confirm_macd: true
+        # 是否要求成交量放大
+        confirm_volume: true
+        # 成交量均线周期
+        volume_ma_period: 20
+        # 成交量放大倍数
+        volume_multiplier: 1.1
+        # 单笔风险比例
+        default_risk_per_trade: 0.01
