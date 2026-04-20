@@ -6,7 +6,7 @@ RUNTIME_DIR="$ROOT_DIR/.aitrade"
 PID_FILE="$RUNTIME_DIR/aitrade.pid"
 RUNTIME_FILE="$RUNTIME_DIR/runtime.env"
 LOG_DIR="$ROOT_DIR/logs"
-VENV_PYTHON="$ROOT_DIR/venv/bin/python"
+VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
 
 info() {
     printf '[INFO] %s\n' "$1"
@@ -66,6 +66,7 @@ latest_trade_log() {
 process_matches() {
     local pid="$1"
     local cmdline
+    local expected_python="${PYTHON_BIN:-$VENV_PYTHON}"
 
     if ! ps -p "$pid" > /dev/null 2>&1; then
         return 1
@@ -76,7 +77,7 @@ process_matches() {
         return 1
     fi
 
-    [[ "$cmdline" == *"$VENV_PYTHON"* && "$cmdline" == *"-m aitrade"* ]]
+    [[ "$cmdline" == *"$expected_python"* && "$cmdline" == *"-m aitrade"* ]]
 }
 
 print_log_info() {

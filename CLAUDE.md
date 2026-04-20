@@ -24,18 +24,16 @@ bash stop.sh
 ```
 
 `init-env.sh` 当前策略是：
-- 优先复用本机已有 `python3`
-- 自动创建 `venv/` 并安装 `requirements.txt`
+- 使用 `uv` 按 `.python-version` 固定的 Python `3.14` 创建并同步 `.venv/`
+- 依赖由 `pyproject.toml` 与 `uv.lock` 管理，`requirements.txt` 仅作为导出产物保留
 - 首次执行时自动从 `config.example.yaml` 生成 `config.yaml`
-- 如果缺少 Python，只输出 macOS / Linux 对应的安装提示，不再默认强依赖 pyenv
+- 如果缺少 `uv`，只输出安装提示
 
 如需手动准备环境，保持以下最小流程：
 
 ```bash
 cp config.example.yaml config.yaml
-python3 -m venv venv
-source venv/bin/activate
-pip3 install -r requirements.txt
+uv sync --python 3.14 --locked
 ```
 
 ### 本地运行
@@ -43,8 +41,7 @@ pip3 install -r requirements.txt
 前台运行：
 
 ```bash
-source venv/bin/activate
-python -m aitrade
+uv run python -m aitrade
 ```
 
 后台运行：
@@ -59,7 +56,7 @@ bash stop.sh
 
 ### 源码打包
 
-`bash package.sh` 会在 `dist/` 下生成带时间戳的 `tar.gz` 源码包，默认排除 `venv`、日志文件和本地 `config.yaml`。
+`bash package.sh` 会在 `dist/` 下生成带时间戳的 `tar.gz` 源码包，默认排除 `.venv`、日志文件和本地 `config.yaml`。
 
 ```bash
 bash package.sh

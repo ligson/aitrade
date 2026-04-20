@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$ROOT_DIR/venv"
+VENV_DIR="$ROOT_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 CONFIG_TEMPLATE="$ROOT_DIR/config.example.yaml"
 CONFIG_FILE="$ROOT_DIR/config.yaml"
@@ -25,40 +25,43 @@ error() {
     printf '[ERROR] %s\n' "$1" >&2
 }
 
-print_python_install_hint() {
+print_uv_install_hint() {
     case "$(uname -s)" in
         Darwin)
-            error "未检测到可用的 python3。"
-            error "原因：当前系统未安装 Python 3，无法创建虚拟环境。"
-            error "建议：先执行 brew install python@$PYTHON_VERSION_HINT，然后重新运行 bash init-env.sh"
+            error "未检测到可用的 uv。"
+            error "原因：当前系统未安装 uv，无法同步项目环境。"
+            error "建议：先使用 Homebrew 或其他方式安装 uv，然后重新运行 bash init-env.sh"
             ;;
         Linux)
-            error "未检测到可用的 python3。"
-            error "原因：当前系统未安装 Python 3，无法创建虚拟环境。"
-            error "建议：先用 apt-get、dnf 或 yum 安装 python3 和 python3-venv 后，再重新运行 bash init-env.sh"
+            error "未检测到可用的 uv。"
+            error "原因：当前系统未安装 uv，无法同步项目环境。"
+            error "建议：先使用系统包管理器或官方安装方式安装 uv，然后重新运行 bash init-env.sh"
             ;;
         *)
-            error "未检测到可用的 python3。"
+            error "未检测到可用的 uv。"
             error "原因：当前系统暂未提供自动安装提示。"
-            error "建议：手动安装 Python 3 后重新运行 bash init-env.sh"
+            error "建议：手动安装 uv 后重新运行 bash init-env.sh"
             ;;
     esac
 }
 
 cd "$ROOT_DIR"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    print_python_install_hint
+if ! command -v uv >/dev/null 2>&1; then
+    print_uv_install_hint
     exit 1
 fi
 
-info "检测到 Python: $(command -v python3)"
-info "开始创建或更新虚拟环境。"
-python3 -m venv "$VENV_DIR"
+info "检测到 uv: $(command -v uv)"
+info "开始创建或更新 uv 环境。"
+uv sync --python "$PYTHON_VERSION_HINT" --locked
 
-info "开始安装 Python 依赖。"
-"$VENV_PYTHON" -m pip install --upgrade pip
-"$VENV_PYTHON" -m pip install -r "$ROOT_DIR/requirements.txt"
+if [ ! -x "$VENV_PYTHON" ]; then
+    error "未找到 uv 环境中的 Python：$VENV_PYTHON"
+    error "原因：uv 环境同步未成功完成。"
+    error "建议：检查上面的 uv 输出后重新执行 bash init-env.sh"
+    exit 1
+fi
 
 if [ ! -f "$CONFIG_FILE" ]; then
     cp "$CONFIG_TEMPLATE" "$CONFIG_FILE"

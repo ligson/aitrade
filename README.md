@@ -22,23 +22,27 @@ bash status.sh
 bash stop.sh
 ```
 
+如需前台运行，可在仓库根目录执行：
+
+```bash
+uv run python -m aitrade
+```
+
 ### `bash init-env.sh`
 
-- 优先复用本机已有 `python3`
-- 自动创建 `venv/`
-- 自动安装 `requirements.txt`
+- 使用 `uv` 按 `.python-version` 固定的 Python `3.14` 创建并同步 `.venv/`
+- 依赖来源为 `pyproject.toml` 与 `uv.lock`
 - 如果不存在 `config.yaml`，会从 `config.example.yaml` 自动生成
 - 执行结束后会提示下一步编辑配置再启动
 
-如果本机缺少 `python3`：
-- macOS：按脚本提示先安装 Homebrew 版 Python
-- Linux：按脚本提示先安装 `python3` 和 `python3-venv`
+如果本机缺少 `uv`：
+- macOS / Linux：按脚本提示先安装 `uv`，再重新执行初始化
 
 ### `bash start.sh`
 
 - 自动切到仓库根目录启动，避免 `./config.yaml` 路径错误
 - 启动前会先校验 `config.yaml`，配置错误会直接输出具体配置项和原因
-- 使用 `venv/bin/python -m aitrade` 后台运行
+- 使用 `.venv/bin/python -m aitrade` 后台运行
 - 运行态写入 `.aitrade/`
 - 启动辅助日志写入 `logs/launcher.log`
 - 启动失败时会输出最近的启动辅助日志和应用日志，便于快速定位原因
@@ -110,7 +114,7 @@ bash stop.sh
 
 ## 打包
 
-执行后会在 `dist/` 目录下生成一个带时间戳的 `tar.gz` 源码包，并排除本地 `venv`、日志和 `config.yaml`：
+执行后会在 `dist/` 目录下生成一个带时间戳的 `tar.gz` 源码包，并排除本地 `.venv`、日志和 `config.yaml`：
 
 ```bash
 bash package.sh

@@ -27,6 +27,8 @@ log "开始准备源码包内容"
 cp -R "$ROOT_DIR/aitrade" "$STAGING_DIR/$PROJECT_NAME/"
 cp "$ROOT_DIR"/*.sh "$STAGING_DIR/$PROJECT_NAME/"
 cp "$ROOT_DIR/requirements.txt" "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR/pyproject.toml" "$STAGING_DIR/$PROJECT_NAME/"
+cp "$ROOT_DIR/uv.lock" "$STAGING_DIR/$PROJECT_NAME/"
 cp "$ROOT_DIR/config.example.yaml" "$STAGING_DIR/$PROJECT_NAME/"
 cp "$ROOT_DIR/README.md" "$STAGING_DIR/$PROJECT_NAME/"
 cp "$ROOT_DIR/CHANGELOG.md" "$STAGING_DIR/$PROJECT_NAME/"
@@ -43,6 +45,7 @@ tar \
     --exclude='*.pyo' \
     --exclude='*.log' \
     --exclude='config.yaml' \
+    --exclude='.venv' \
     --exclude='venv' \
     --exclude='dist' \
     -czf "$ARCHIVE_PATH" \

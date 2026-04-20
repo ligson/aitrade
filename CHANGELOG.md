@@ -2,6 +2,14 @@
 
 所有有意义的仓库变更都应记录在这里。
 
+## 2026-04-20
+
+- 新增 `pyproject.toml` 与 `uv.lock`，将项目依赖切换为由 uv 管理，并固定 Python 版本为 `3.14`。
+- 改造 `init-env.sh`、`start.sh`、`status.sh`、`stop.sh`、`package.sh` 与 `create-deps.sh`：本地环境改为 `.venv/`，初始化与依赖导出统一走 uv。
+- 更新 `README.md` 与 `CLAUDE.md`，同步说明新的 uv 初始化、前台运行和打包方式。
+
+- 更新 `.gitignore` 说明：明确 `uv.lock` 应提交到版本控制，继续忽略 `.venv`、日志文件和本地运行态产物。
+
 ## 2026-04-17
 
 - 新增 `CLAUDE.md`，补充了面向后续 Claude Code 会话的仓库说明，包括常用命令、核心架构和文档协作规则。

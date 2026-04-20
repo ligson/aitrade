@@ -7,7 +7,7 @@ PID_FILE="$RUNTIME_DIR/aitrade.pid"
 RUNTIME_FILE="$RUNTIME_DIR/runtime.env"
 LOG_DIR="$ROOT_DIR/logs"
 LAUNCHER_LOG="$LOG_DIR/launcher.log"
-VENV_PYTHON="$ROOT_DIR/venv/bin/python"
+VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
 CONFIG_FILE="$ROOT_DIR/config.yaml"
 
 info() {
@@ -181,7 +181,7 @@ is_startup_successful() {
 cd "$ROOT_DIR"
 
 if [ ! -x "$VENV_PYTHON" ]; then
-    error "未找到虚拟环境中的 Python：$VENV_PYTHON"
+    error "未找到 uv 环境中的 Python：$VENV_PYTHON"
     error "原因：环境尚未初始化完成。"
     error "建议：先执行 bash init-env.sh"
     exit 1
