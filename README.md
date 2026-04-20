@@ -120,12 +120,6 @@ uv run python -m aitrade
 bash package.sh
 ```
 
-## 依赖清单刷新
-
-```bash
-bash create-deps.sh
-```
-
 ## 协作文档约定
 
 - 每次有意义的仓库改动都同步更新 `CHANGELOG.md`

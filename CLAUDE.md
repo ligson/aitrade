@@ -25,7 +25,7 @@ bash stop.sh
 
 `init-env.sh` 当前策略是：
 - 使用 `uv` 按 `.python-version` 固定的 Python `3.14` 创建并同步 `.venv/`
-- 依赖由 `pyproject.toml` 与 `uv.lock` 管理，`requirements.txt` 仅作为导出产物保留
+- 依赖由 `pyproject.toml` 与 `uv.lock` 管理
 - 首次执行时自动从 `config.example.yaml` 生成 `config.yaml`
 - 如果缺少 `uv`，只输出安装提示
 
@@ -60,12 +60,6 @@ bash stop.sh
 
 ```bash
 bash package.sh
-```
-
-### 刷新依赖清单
-
-```bash
-bash create-deps.sh
 ```
 
 ### 测试与 lint
