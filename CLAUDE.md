@@ -106,8 +106,9 @@ app:
 新环境初始化时，以 `config.example.yaml` 作为配置结构的权威示例。
 
 额外的持久化约定：
-- 默认会把结构化交易记录写入 `./.aitrade/trades.sqlite3`
+- 默认通过 SQLAlchemy 同步 ORM 把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`
 - `trade_records` 表用于查询交易记录，`position_state` 表用于保存本地持仓快照
+- `app.trade.persistence.database_url` 是主配置项；`sqlite_path` 仅作为兼容旧配置的别名
 - `app.trade.persistence.restore_position_on_startup` 默认应保持 `false`，除非明确接受用本地快照恢复持仓的风险
 - 如需本地查询，使用 `bash query-trades.sh`，不要虚构其他不存在的查询命令
 
@@ -166,7 +167,7 @@ app:
 
 ## 重要实现约束
 
-- 持仓状态会同时保存在 `trade_executor.py` 的内存对象和 `./.aitrade/trades.sqlite3` 中；只有在显式开启 `app.trade.persistence.restore_position_on_startup` 时，才会在启动时从本地快照恢复。
+- 持仓状态会同时保存在 `trade_executor.py` 的内存对象和持久化存储中；默认数据库地址是 `sqlite:///./.aitrade/trades.sqlite3`，只有在显式开启 `app.trade.persistence.restore_position_on_startup` 时，才会在启动时从本地快照恢复。
 - 配置路径写死为 `./config.yaml`，因此脚本必须先切到仓库根目录执行，除非相关代码被调整。
 - 后台运行态保存在 `.aitrade/`；主应用日志、交易日志和启动辅助日志保存在 `logs/`。
 - 当前缺少测试，验证方式以手工和定向检查为主。

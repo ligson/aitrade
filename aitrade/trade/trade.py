@@ -1,6 +1,6 @@
 import logging
 
-from .trading_system import TradingBot
+from .trading_system.trading_bot import TradingBot
 from ..config import config_file
 
 

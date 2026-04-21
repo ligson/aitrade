@@ -29,13 +29,15 @@ app:
     # 交易数据个数,默认100
     limit: 100
     persistence:
-      # 是否启用SQLite交易记录
+      # 是否启用交易记录持久化
       enabled: true
-      # SQLite数据库路径
-      sqlite_path: ./.aitrade/trades.sqlite3
+      # 数据库连接地址，默认使用本地 SQLite；将来可改为 MySQL 等其他数据库 DSN
+      database_url: sqlite:///./.aitrade/trades.sqlite3
+      # 兼容旧配置时可继续使用 sqlite_path，但优先推荐 database_url
+      # sqlite_path: ./.aitrade/trades.sqlite3
       # 是否持久化当前持仓状态
       persist_position: true
-      # 启动时是否从本地SQLite恢复持仓
+      # 启动时是否从本地持久化快照恢复持仓
       restore_position_on_startup: false
     strategy:
       # 可选值: gpt, btc_spot_breakout

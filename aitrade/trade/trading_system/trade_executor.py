@@ -5,7 +5,8 @@ from typing import Any, Dict, Optional
 
 import ccxt
 
-from .sqlite_trade_store import SQLiteTradeStore
+from .trade_store_factory import create_trade_store
+from .trade_store_factory import summarize_database_target
 
 
 class TradeExecutor:
@@ -59,14 +60,18 @@ class TradeExecutor:
         self.persist_position = bool(self.persistence_config.get('persist_position', True))
         self.store = None
         if self.persistence_enabled:
-            self.store = SQLiteTradeStore(self.persistence_config['sqlite_path'])
-            logging.info("SQLite交易记录已启用: %s", self.store.db_path)
+            self.store = create_trade_store(self.persistence_config)
+            logging.info(
+                "交易持久化已启用: backend=%s, target=%s",
+                self.store.backend,
+                summarize_database_target(self.store.database_url),
+            )
         logging.debug("交易执行器初始化完成")
 
     def close(self) -> None:
         if self.store is not None:
             self.store.close()
-            logging.info("SQLite交易记录已关闭")
+            logging.info("交易持久化已关闭")
 
     def restore_position_from_storage(self, symbol: str) -> Optional[Dict[str, Any]]:
         if self.store is None or not self.persist_position:
@@ -89,7 +94,7 @@ class TradeExecutor:
             'strategy': stored_position.get('strategy'),
             'meta': stored_position.get('meta', {}),
         }
-        logging.info("已从SQLite恢复本地持仓: %s", self.position)
+        logging.info("已从持久化存储恢复本地持仓: %s", self.position)
         return self.position
 
     def execute_trade_with_risk_management(

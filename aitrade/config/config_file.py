@@ -27,7 +27,7 @@ DEFAULT_BTC_SPOT_BREAKOUT_CONFIG = {
 
 DEFAULT_TRADE_PERSISTENCE_CONFIG = {
     'enabled': True,
-    'sqlite_path': './.aitrade/trades.sqlite3',
+    'database_url': 'sqlite:///./.aitrade/trades.sqlite3',
     'persist_position': True,
     'restore_position_on_startup': False,
 }
@@ -153,16 +153,32 @@ class Config:
             DEFAULT_BTC_SPOT_BREAKOUT_CONFIG,
             strategy_cfg.get('btc_spot_breakout', {}),
         )
+        persistence_overrides = trade_cfg.get('persistence', {})
+        if persistence_overrides is None:
+            persistence_overrides = {}
+        persistence_overrides = _require_mapping(persistence_overrides, 'app.trade.persistence')
         self.trade_persistence_config = merge_config(
             DEFAULT_TRADE_PERSISTENCE_CONFIG,
-            trade_cfg.get('persistence', {}),
+            persistence_overrides,
         )
 
         _require_bool(self.trade_persistence_config.get('enabled'), 'app.trade.persistence.enabled')
-        self.trade_persistence_config['sqlite_path'] = _require_non_empty_string(
-            self.trade_persistence_config.get('sqlite_path'),
-            'app.trade.persistence.sqlite_path',
+        database_url = persistence_overrides.get('database_url')
+        if database_url is None and persistence_overrides.get('sqlite_path') is not None:
+            sqlite_path = _require_non_empty_string(
+                persistence_overrides.get('sqlite_path'),
+                'app.trade.persistence.sqlite_path',
+            )
+            database_url = f'sqlite:///{sqlite_path}'
+        self.trade_persistence_config['database_url'] = _require_non_empty_string(
+            database_url or self.trade_persistence_config.get('database_url'),
+            'app.trade.persistence.database_url',
         )
+        if persistence_overrides.get('sqlite_path') is not None:
+            self.trade_persistence_config['sqlite_path'] = _require_non_empty_string(
+                persistence_overrides.get('sqlite_path'),
+                'app.trade.persistence.sqlite_path',
+            )
         _require_bool(self.trade_persistence_config.get('persist_position'), 'app.trade.persistence.persist_position')
         _require_bool(
             self.trade_persistence_config.get('restore_position_on_startup'),
