@@ -10,6 +10,7 @@ A simple trading system for AI.
 4. `app.trade.strategy.type` 可切换交易策略：
    - `gpt`：保留原有 AI 信号策略
    - `btc_spot_breakout`：BTC 现货 long-only 规则策略
+5. 默认会把结构化交易记录写入 `./.aitrade/trades.sqlite3`
 
 ## 初始化与运行
 
@@ -83,6 +84,23 @@ uv run python -m aitrade
 
 > 默认参数为 15 分钟周期做了保守过滤，但 15 分钟噪音仍然较大，建议优先在沙盒环境观察信号质量。
 
+### SQLite 交易记录
+
+- 默认会把交易执行结果写入 `./.aitrade/trades.sqlite3`
+- 默认会持久化当前本地持仓、止损和追踪止损状态到 `position_state` 表
+- `app.trade.persistence.restore_position_on_startup` 默认是 `false`，避免本地快照与真实交易所状态不一致时自动恢复
+- `trade_records` 会记录策略、时间、方向、价格、数量、原因、止损/追踪止损、订单结果、失败原因等字段
+
+常见查询方式：
+
+```bash
+bash query-trades.sh latest 20
+bash query-trades.sh strategy gpt 20
+bash query-trades.sh side buy 20
+bash query-trades.sh failed 20
+bash query-trades.sh position
+```
+
 ## 项目流程
 
 程序启动后会按如下顺序循环执行：
@@ -102,11 +120,12 @@ uv run python -m aitrade
 - `aitrade/trade/trading_system/market_data_fetcher.py`：行情获取与指标整理
 - `aitrade/trade/gpt_signal/`：GPT 信号分析、提示词构建、响应解析
 - `aitrade/trade/trading_system/risk_manager.py`：风控检查与仓位计算
-- `aitrade/trade/trading_system/trade_executor.py`：下单、持仓状态和止损信息管理
+- `aitrade/trade/trading_system/trade_executor.py`：下单、持仓状态、止损信息管理，以及 SQLite 交易记录落库
+- `aitrade/trade/trading_system/sqlite_trade_store.py`：SQLite 建表、交易记录查询与持仓快照持久化
 
 ## 当前限制
 
-- 持仓状态仍保存在进程内存中，程序重启后不会自动恢复
+- 持仓状态会同时保存在进程内存和 `./.aitrade/trades.sqlite3` 中，但默认不会在启动时自动恢复；如需恢复，需要显式打开 `app.trade.persistence.restore_position_on_startup`
 - 当前仓库未内置测试套件，本次主要做了脚本语法检查与定向验证
 - `start.sh` / `status.sh` / `stop.sh` 依赖仓库根目录下的 `.aitrade/` 运行态目录
 - 主应用日志、交易日志和启动辅助日志默认写入 `logs/`

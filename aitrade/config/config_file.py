@@ -25,6 +25,13 @@ DEFAULT_BTC_SPOT_BREAKOUT_CONFIG = {
     'default_risk_per_trade': 0.01,
 }
 
+DEFAULT_TRADE_PERSISTENCE_CONFIG = {
+    'enabled': True,
+    'sqlite_path': './.aitrade/trades.sqlite3',
+    'persist_position': True,
+    'restore_position_on_startup': False,
+}
+
 
 class ConfigValidationError(ValueError):
     """配置校验失败。"""
@@ -145,6 +152,21 @@ class Config:
         self.trade_strategy_btc_spot_config = merge_config(
             DEFAULT_BTC_SPOT_BREAKOUT_CONFIG,
             strategy_cfg.get('btc_spot_breakout', {}),
+        )
+        self.trade_persistence_config = merge_config(
+            DEFAULT_TRADE_PERSISTENCE_CONFIG,
+            trade_cfg.get('persistence', {}),
+        )
+
+        _require_bool(self.trade_persistence_config.get('enabled'), 'app.trade.persistence.enabled')
+        self.trade_persistence_config['sqlite_path'] = _require_non_empty_string(
+            self.trade_persistence_config.get('sqlite_path'),
+            'app.trade.persistence.sqlite_path',
+        )
+        _require_bool(self.trade_persistence_config.get('persist_position'), 'app.trade.persistence.persist_position')
+        _require_bool(
+            self.trade_persistence_config.get('restore_position_on_startup'),
+            'app.trade.persistence.restore_position_on_startup',
         )
 
         _require_positive_number(

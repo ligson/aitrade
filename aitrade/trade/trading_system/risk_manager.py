@@ -8,49 +8,100 @@ class RiskManager:
     """风险管理器。"""
 
     @staticmethod
-    def risk_management_check(data: Dict[str, Any], signal: Dict[str, Any]) -> bool:
+    def risk_management_check(data: Dict[str, Any], signal: Dict[str, Any]) -> Dict[str, Any]:
         proposed_action = signal.get('action', 'hold')
         strategy = signal.get('strategy', 'unknown')
+        closes = data.get('closes', [])
+        price = data.get('price')
+        technicals = data.get('technicals', {})
+        rsi = technicals.get('rsi')
+
+        metrics = {
+            'price': price,
+            'rsi': rsi,
+            'strategy': strategy,
+            'proposed_action': proposed_action,
+            'force_execution': bool(signal.get('force_execution')),
+        }
 
         if proposed_action == 'hold':
             logging.debug("操作为持有，无需风险检查")
-            return True
+            return {
+                'passed': True,
+                'reason': '操作为持有，无需风险检查',
+                'metrics': metrics,
+            }
 
         if signal.get('force_execution'):
             logging.info("检测到强制执行信号，跳过常规风控拦截")
-            return True
+            return {
+                'passed': True,
+                'reason': '强制执行信号跳过常规风控',
+                'metrics': metrics,
+            }
 
-        closes = data.get('closes', [])
         if len(closes) < 10:
             logging.warning("价格数据不足，取消交易")
-            return False
+            return {
+                'passed': False,
+                'reason': '价格数据不足，取消交易',
+                'metrics': metrics,
+            }
 
-        price = data['price']
-        rsi = data['technicals']['rsi']
         volatility = np.std(closes[-10:]) / max(np.mean(closes[-10:]), 1e-10)
+        metrics['volatility'] = float(volatility)
         logging.info("风险检查 - 策略: %s, 价格: %s, RSI: %.2f, 波动率: %.4f", strategy, price, rsi, volatility)
 
         if volatility > 0.05:
-            logging.warning("市场波动率过高 (%.4f)，取消交易", volatility)
-            return False
+            reason = f'市场波动率过高 ({volatility:.4f})，取消交易'
+            logging.warning(reason)
+            return {
+                'passed': False,
+                'reason': reason,
+                'metrics': metrics,
+            }
 
         if strategy == 'btc_spot_breakout':
             stop_loss_price = signal.get('stop_loss_price')
+            metrics['stop_loss_price'] = stop_loss_price
             if proposed_action == 'buy' and stop_loss_price is not None and stop_loss_price >= price:
-                logging.warning("规则策略止损价异常，取消买入")
-                return False
+                reason = '规则策略止损价异常，取消买入'
+                logging.warning(reason)
+                return {
+                    'passed': False,
+                    'reason': reason,
+                    'metrics': metrics,
+                }
             logging.info("规则策略风控检查通过")
-            return True
+            return {
+                'passed': True,
+                'reason': '规则策略风控检查通过',
+                'metrics': metrics,
+            }
 
         if proposed_action == 'buy' and rsi > 80:
-            logging.warning("RSI值过高 (%.2f)，避免买入", rsi)
-            return False
+            reason = f'RSI值过高 ({rsi:.2f})，避免买入'
+            logging.warning(reason)
+            return {
+                'passed': False,
+                'reason': reason,
+                'metrics': metrics,
+            }
         if proposed_action == 'sell' and rsi < 20:
-            logging.warning("RSI值过低 (%.2f)，避免卖出", rsi)
-            return False
+            reason = f'RSI值过低 ({rsi:.2f})，避免卖出'
+            logging.warning(reason)
+            return {
+                'passed': False,
+                'reason': reason,
+                'metrics': metrics,
+            }
 
         logging.info("风险检查通过，可以执行交易")
-        return True
+        return {
+            'passed': True,
+            'reason': '风险检查通过，可以执行交易',
+            'metrics': metrics,
+        }
 
     @staticmethod
     def calculate_position_size(balance: float, risk_per_trade: float = 0.02, stop_loss_pct: float = 0.05) -> float:

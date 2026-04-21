@@ -6,6 +6,7 @@ from .config import log_config
 from .trade.trade import OptimizedCryptoBot
 
 if __name__ == "__main__":
+    bot = None
     try:
         log_config.config_log()
         cfg = config_file.Config("./config.yaml")
@@ -19,3 +20,6 @@ if __name__ == "__main__":
         logging.exception("程序启动失败: %s", exc)
         print(f"[ERROR] 程序启动失败: {exc}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        if bot is not None:
+            bot.close()

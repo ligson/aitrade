@@ -33,6 +33,7 @@ class TradingBot:
             password=config.exchange_password,
             sandbox=config.trade_sandbox_trade,
             proxies={'http': config.proxy_url, 'https': config.proxy_url} if config.proxy_enable else None,
+            persistence_config=config.trade_persistence_config,
         )
 
         logging.info("初始化风险管理器")
@@ -42,6 +43,13 @@ class TradingBot:
         self.strategy = create_strategy(config)
         self.required_history = max(config.trade_limit, self.strategy.get_required_history())
 
+        if config.trade_persistence_config.get('restore_position_on_startup'):
+            restored = self.trade_executor.restore_position_from_storage(config.trade_symbol)
+            if restored:
+                logging.info("已恢复本地持仓状态，交易对: %s", config.trade_symbol)
+            else:
+                logging.info("未恢复到本地持仓状态，交易对: %s", config.trade_symbol)
+
         logging.info(
             "交易机器人初始化完成 - 交易所类型: %s, 代理是否启用: %s, 代理地址: %s, 策略: %s, K线数量: %s",
             config.exchange_type,
@@ -50,6 +58,9 @@ class TradingBot:
             config.trade_strategy_type,
             self.required_history,
         )
+
+    def close(self) -> None:
+        self.trade_executor.close()
 
     def run(self) -> None:
         logging.info("启动交易机器人主循环...")
@@ -70,6 +81,7 @@ class TradingBot:
 
                 if position:
                     self.trade_executor.update_position_risk(
+                        symbol=self.config.trade_symbol,
                         stop_loss=signal.get('stop_loss_price'),
                         trailing_stop_price=signal.get('trailing_stop_price'),
                         market_price=data['price'],
@@ -84,6 +96,7 @@ class TradingBot:
                         signal,
                         data,
                         self.risk_manager,
+                        trigger_source='strategy_signal',
                     )
                 else:
                     logging.info("当前信号不建议交易")
@@ -124,6 +137,7 @@ class TradingBot:
                 stop_loss_signal,
                 market_data,
                 self.risk_manager,
+                trigger_source='stop_loss_trigger',
             )
             logging.info("止损操作执行完成")
         except Exception as e:

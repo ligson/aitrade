@@ -62,6 +62,16 @@ bash stop.sh
 bash package.sh
 ```
 
+### 查询交易记录
+
+```bash
+bash query-trades.sh latest 20
+bash query-trades.sh strategy gpt 20
+bash query-trades.sh side buy 20
+bash query-trades.sh failed 20
+bash query-trades.sh position
+```
+
 ### 测试与 lint
 
 当前仓库中没有测试套件、lint 命令、格式化配置或正式的构建系统。文档里不要虚构这些命令。如果需要验证改动，优先做和改动相关的定向冒烟验证，并明确说明哪些内容已验证、哪些没有验证。
@@ -74,7 +84,7 @@ bash package.sh
 - `app.gpt`：模型提供方、API Key、模型名
 - `app.exchange`：交易所类型、凭证，以及可选的 OKX 密码
 - `app.http_client`：代理开关与代理地址
-- `app.trade`：沙盒模式、交易对、时间周期、K 线数量
+- `app.trade`：沙盒模式、交易对、时间周期、K 线数量，以及持久化配置
 - `app.trade.strategy`：策略类型与各策略参数
 
 配置切换示例：
@@ -94,6 +104,12 @@ app:
 ```
 
 新环境初始化时，以 `config.example.yaml` 作为配置结构的权威示例。
+
+额外的持久化约定：
+- 默认会把结构化交易记录写入 `./.aitrade/trades.sqlite3`
+- `trade_records` 表用于查询交易记录，`position_state` 表用于保存本地持仓快照
+- `app.trade.persistence.restore_position_on_startup` 默认应保持 `false`，除非明确接受用本地快照恢复持仓的风险
+- 如需本地查询，使用 `bash query-trades.sh`，不要虚构其他不存在的查询命令
 
 ## 架构说明
 
@@ -150,7 +166,7 @@ app:
 
 ## 重要实现约束
 
-- 持仓状态保存在 `trade_executor.py` 的内存对象中；进程重启后，本地持仓状态会丢失。
+- 持仓状态会同时保存在 `trade_executor.py` 的内存对象和 `./.aitrade/trades.sqlite3` 中；只有在显式开启 `app.trade.persistence.restore_position_on_startup` 时，才会在启动时从本地快照恢复。
 - 配置路径写死为 `./config.yaml`，因此脚本必须先切到仓库根目录执行，除非相关代码被调整。
 - 后台运行态保存在 `.aitrade/`；主应用日志、交易日志和启动辅助日志保存在 `logs/`。
 - 当前缺少测试，验证方式以手工和定向检查为主。

@@ -12,3 +12,6 @@ class OptimizedCryptoBot:
     def run(self):
         """运行交易机器人"""
         self.trading_bot.run()
+
+    def close(self):
+        self.trading_bot.close()
