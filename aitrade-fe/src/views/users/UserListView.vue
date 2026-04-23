@@ -1,7 +1,7 @@
 <template>
-  <a-card title="用户维护">
+  <a-card>
     <a-space direction="vertical" style="width: 100%">
-      <a-space>
+      <a-space wrap>
         <a-input v-model:value="keyword" placeholder="搜索用户名/邮箱/昵称" style="width: 260px" />
         <a-button type="primary" @click="loadUsers">查询</a-button>
         <a-button @click="openCreate">新增用户</a-button>
@@ -12,7 +12,7 @@
             <a-tag :color="record.status === 'active' ? 'green' : 'red'">{{ record.status }}</a-tag>
           </template>
           <template v-else-if="column.key === 'actions'">
-            <a-space>
+            <a-space wrap>
               <a-button type="link" @click="openEdit(record)">编辑</a-button>
               <a-button type="link" @click="openResetPassword(record)">重置密码</a-button>
               <a-button type="link" @click="toggleStatus(record)">{{ record.status === 'active' ? '锁定' : '启用' }}</a-button>

@@ -1,30 +1,30 @@
 <template>
-  <a-card title="交易日志查询">
+  <a-card class="page-card">
     <a-space direction="vertical" size="large" style="width: 100%">
       <a-form layout="vertical" class="filter-form">
         <div class="filter-grid">
-          <a-form-item label="策略" class="filter-item filter-item-compact">
+          <a-form-item label="策略" class="filter-item">
             <a-select v-model:value="filters.strategy" allow-clear placeholder="全部策略">
               <a-select-option v-for="item in strategyOptions" :key="item.value" :value="item.value">
                 {{ item.label }}
               </a-select-option>
             </a-select>
           </a-form-item>
-          <a-form-item label="方向" class="filter-item filter-item-compact">
+          <a-form-item label="方向" class="filter-item">
             <a-select v-model:value="filters.side" allow-clear placeholder="全部方向">
               <a-select-option v-for="item in sideOptions" :key="item.value" :value="item.value">
                 {{ item.label }}
               </a-select-option>
             </a-select>
           </a-form-item>
-          <a-form-item label="结果" class="filter-item filter-item-compact">
+          <a-form-item label="结果" class="filter-item">
             <a-select v-model:value="filters.result" allow-clear placeholder="全部结果">
               <a-select-option v-for="item in resultOptions" :key="item.value" :value="item.value">
                 {{ item.label }}
               </a-select-option>
             </a-select>
           </a-form-item>
-          <a-form-item label="交易对" class="filter-item filter-item-compact">
+          <a-form-item label="交易对" class="filter-item">
             <a-select v-model:value="filters.symbol" allow-clear show-search placeholder="全部交易对" :filter-option="filterSelectOption">
               <a-select-option v-for="item in symbolOptions" :key="item" :value="item">
                 {{ item }}
@@ -57,8 +57,11 @@
           <template v-else-if="column.key === 'market_price' || column.key === 'requested_amount'">
             {{ formatNumber(text) }}
           </template>
+          <template v-else-if="column.key === 'symbol'">
+            {{ formatSymbol(text) }}
+          </template>
           <template v-else>
-            {{ text || '-' }}
+            {{ displayText(text) }}
           </template>
         </template>
       </a-table>
@@ -72,8 +75,11 @@
           <template v-else-if="column.key === 'entry_price' || column.key === 'amount' || column.key === 'stop_loss'">
             {{ formatNumber(text) }}
           </template>
+          <template v-else-if="column.key === 'symbol'">
+            {{ formatSymbol(text) }}
+          </template>
           <template v-else>
-            {{ text || '-' }}
+            {{ displayText(text) }}
           </template>
         </template>
       </a-table>
@@ -173,6 +179,21 @@ function buildPayload() {
   }
 }
 
+function displayText(value: unknown) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed || '-'
+  }
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return String(value)
+}
+
+function formatSymbol(value: unknown) {
+  return displayText(value)
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return '-'
@@ -238,7 +259,7 @@ async function loadLogs() {
 async function loadFilterOptions() {
   const [strategyDefinitions, filterOptions] = await Promise.all([fetchStrategyDefinitions(), fetchTradeLogFilterOptions()])
   definitions.value = strategyDefinitions
-  symbolOptions.value = filterOptions.symbols
+  symbolOptions.value = Array.from(new Set(filterOptions.symbols.map((item) => item.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 async function loadPositions() {
@@ -275,26 +296,38 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.page-card {
+  height: 100%;
+}
+
 .filter-form {
   width: 100%;
 }
 
 .filter-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 0 16px;
   margin-bottom: 8px;
 }
 
 .filter-item {
+  min-width: 0;
   margin-bottom: 12px;
 }
 
-.filter-item-compact {
-  max-width: 180px;
+.filter-item-range {
+  grid-column: span 2;
 }
 
-.filter-item-range {
-  min-width: 320px;
+.filter-item :deep(.ant-select),
+.filter-item :deep(.ant-picker) {
+  width: 100%;
+}
+
+@media (max-width: 1200px) {
+  .filter-item-range {
+    grid-column: span 1;
+  }
 }
 </style>

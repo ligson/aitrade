@@ -1,11 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
-import BasicLayout from '@/layouts/BasicLayout.vue'
-import LoginView from '@/views/login/LoginView.vue'
-import UserListView from '@/views/users/UserListView.vue'
-import TradeLogView from '@/views/trade-logs/TradeLogView.vue'
-import StrategyConfigView from '@/views/strategies/StrategyConfigView.vue'
+import { useRouteLoading } from '@/stores/routeLoading'
+
+const BasicLayout = () => import('@/layouts/BasicLayout.vue')
+const LoginView = () => import('@/views/login/LoginView.vue')
+const UserListView = () => import('@/views/users/UserListView.vue')
+const TradeLogView = () => import('@/views/trade-logs/TradeLogView.vue')
+const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -27,16 +29,25 @@ const router = createRouter({
           path: 'users',
           name: 'users',
           component: UserListView,
+          meta: {
+            title: '用户维护',
+          },
         },
         {
           path: 'trade-logs',
           name: 'trade-logs',
           component: TradeLogView,
+          meta: {
+            title: '交易日志',
+          },
         },
         {
           path: 'strategies',
           name: 'strategies',
           component: StrategyConfigView,
+          meta: {
+            title: '策略配置',
+          },
         },
       ],
     },
@@ -44,7 +55,10 @@ const router = createRouter({
 })
 
 let restored = false
+const routeLoading = useRouteLoading()
+
 router.beforeEach(async (to) => {
+  routeLoading.start()
   const auth = useAuthStore()
   if (!restored) {
     restored = true
@@ -59,4 +73,13 @@ router.beforeEach(async (to) => {
   return true
 })
 
+router.afterEach(() => {
+  routeLoading.finish()
+})
+
+router.onError(() => {
+  routeLoading.fail()
+})
+
+export { router }
 export default router

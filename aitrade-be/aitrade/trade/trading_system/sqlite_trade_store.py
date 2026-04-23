@@ -174,9 +174,9 @@ class SQLiteTradeStore:
 
     def list_trade_symbols(self) -> List[str]:
         rows = self.conn.execute(
-            "SELECT DISTINCT symbol FROM trade_records WHERE symbol IS NOT NULL AND symbol != '' ORDER BY symbol ASC"
+            "SELECT DISTINCT TRIM(symbol) AS symbol FROM trade_records WHERE symbol IS NOT NULL AND TRIM(symbol) != '' ORDER BY TRIM(symbol) ASC"
         ).fetchall()
-        return [str(row['symbol']) for row in rows]
+        return [str(row['symbol']).strip() for row in rows if str(row['symbol']).strip()]
 
     def _initialize(self) -> None:
         self.conn.executescript(

@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { message } from 'ant-design-vue'
 
+import { router } from '@/router'
 import type { ApiEnvelope } from '@/types/api'
 import { clearToken, getToken } from '@/utils/token'
 
@@ -31,8 +32,8 @@ http.interceptors.response.use(
     const apiMessage = error.response?.data?.message as string | undefined
     if (status === 401) {
       clearToken()
-      if (location.pathname !== '/login') {
-        location.href = '/login'
+      if (router.currentRoute.value.path !== '/login') {
+        router.replace('/login')
       }
     }
     message.error(apiMessage || error.message || '请求失败')
