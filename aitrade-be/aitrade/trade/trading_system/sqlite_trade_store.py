@@ -172,6 +172,12 @@ class SQLiteTradeStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_trade_record(row) for row in rows]
 
+    def list_trade_symbols(self) -> List[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT symbol FROM trade_records WHERE symbol IS NOT NULL AND symbol != '' ORDER BY symbol ASC"
+        ).fetchall()
+        return [str(row['symbol']) for row in rows]
+
     def _initialize(self) -> None:
         self.conn.executescript(
             '''

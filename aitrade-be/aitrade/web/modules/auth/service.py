@@ -53,8 +53,14 @@ class AuthService:
         password = payload.get('password', '').strip()
         captcha_key = payload.get('captchaKey', '').strip()
         captcha_code = payload.get('captchaCode', '').strip()
-        if not username or not password or not captcha_key or not captcha_code:
-            raise ValidationError('登录参数不完整')
+        if not username:
+            raise ValidationError('请输入用户名')
+        if not password:
+            raise ValidationError('请输入密码')
+        if not captcha_key:
+            raise ValidationError('验证码已失效，请刷新后重试')
+        if not captcha_code:
+            raise ValidationError('请输入验证码')
         self.captcha_service.verify_captcha(captcha_key, captcha_code)
         with self.Session() as session:
             model = session.query(UserModel).filter(UserModel.username == username).first()

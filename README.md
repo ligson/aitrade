@@ -41,6 +41,7 @@ bash package.sh
 ## 文档分层
 
 - 仓库级说明：当前 `README.md` 与根目录 `CLAUDE.md`
+- 架构与模块文档：`docs/architecture.md`、`docs/backend.md`、`docs/frontend.md`、`docs/api.md`、`docs/operations.md`
 - 后端详细说明：`aitrade-be/README.md` 与 `aitrade-be/CLAUDE.md`
 
 ## 当前状态

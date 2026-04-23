@@ -138,6 +138,12 @@ class SQLAlchemyTradeStore:
             models = session.execute(stmt).scalars().all()
             return [self._position_state_to_dict(model) for model in models]
 
+    def list_trade_symbols(self) -> List[str]:
+        stmt = select(TradeRecordModel.symbol).where(TradeRecordModel.symbol.is_not(None)).distinct().order_by(TradeRecordModel.symbol.asc())
+        with self.Session() as session:
+            rows = session.execute(stmt).scalars().all()
+            return [item for item in rows if item]
+
     @staticmethod
     def _apply_trade_filters(stmt, strategy, side, result, results, symbol, created_from, created_to):
         if strategy:

@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Protocol, Sequence
 
 
+
 class TradeStore(Protocol):
     database_url: str
     backend: str
@@ -45,3 +46,5 @@ class TradeStore(Protocol):
     ) -> int: ...
 
     def query_position_states(self) -> List[Dict[str, Any]]: ...
+
+    def list_trade_symbols(self) -> List[str]: ...

@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <a-card title="aitrade 登录" class="login-card">
-      <a-form layout="vertical" @finish="handleLogin">
+      <a-form :model="form" :rules="rules" layout="vertical" @finish="handleLogin">
         <a-form-item label="用户名" name="username">
           <a-input v-model:value="form.username" placeholder="请输入用户名" />
         </a-form-item>
@@ -43,6 +43,12 @@ const form = reactive({
   password: 'admin123456',
   captchaCode: '',
 })
+
+const rules = {
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  captchaCode: [{ required: true, message: '请输入验证码', trigger: 'blur' }],
+}
 
 async function loadCaptcha() {
   const data = await fetchCaptcha()

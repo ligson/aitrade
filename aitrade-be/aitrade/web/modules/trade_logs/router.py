@@ -59,3 +59,12 @@ def current_positions(
 ):
     store = create_trade_store(config.trade_persistence_config)
     return success_response(store.query_position_states())
+
+
+@router.post('/filter-options')
+def trade_log_filter_options(
+    config: Config = Depends(get_config),
+    _: dict = Depends(get_current_user),
+):
+    store = create_trade_store(config.trade_persistence_config)
+    return success_response({'symbols': store.list_trade_symbols()})

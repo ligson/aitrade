@@ -1,6 +1,6 @@
 import { post } from './http'
 import type { PageData } from '@/types/api'
-import type { PositionItem, TradeLogItem } from '@/types/tradeLog'
+import type { PositionItem, TradeLogFilterOptions, TradeLogItem } from '@/types/tradeLog'
 
 export function pageTradeLogs(payload: {
   offset: number
@@ -17,4 +17,8 @@ export function pageTradeLogs(payload: {
 
 export function fetchPositions() {
   return post<PositionItem[]>('/api/trade-logs/positions')
+}
+
+export function fetchTradeLogFilterOptions() {
+  return post<TradeLogFilterOptions>('/api/trade-logs/filter-options')
 }

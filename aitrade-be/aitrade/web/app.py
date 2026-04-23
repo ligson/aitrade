@@ -2,6 +2,7 @@ import traceback
 from http import HTTPStatus
 
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -52,6 +53,18 @@ def create_app(config: Config) -> FastAPI:
             'data': {},
         }
         return JSONResponse(status_code=exc.http_code, content=payload)
+
+    @app.exception_handler(HTTPException)
+    async def handle_http_exception(_: Request, exc: HTTPException):
+        detail = exc.detail if isinstance(exc.detail, str) else HTTPStatus(exc.status_code).phrase
+        payload = {
+            'success': False,
+            'message': detail,
+            'trace': '',
+            'httpCode': int(exc.status_code),
+            'data': {},
+        }
+        return JSONResponse(status_code=exc.status_code, content=payload)
 
     @app.exception_handler(Exception)
     async def handle_unexpected_error(_: Request, exc: Exception):

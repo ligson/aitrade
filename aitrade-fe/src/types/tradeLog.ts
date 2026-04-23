@@ -26,3 +26,7 @@ export interface PositionItem {
   highest_close: number | null
   updated_at: string | null
 }
+
+export interface TradeLogFilterOptions {
+  symbols: string[]
+}

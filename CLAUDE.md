@@ -44,7 +44,9 @@ bash package.sh
 
 - 每次有意义的仓库改动，都要同步更新 `CHANGELOG.md`。
 - 仓库级说明优先放根目录 `README.md` / `CLAUDE.md`。
+- 架构、模块、接口和运维类长文档优先收敛到根目录 `docs/`。
 - 后端实现、运行和约束说明优先放 `aitrade-be/README.md` / `aitrade-be/CLAUDE.md`。
+- 当一次会话形成对后续仍有价值的长期信息时，项目级知识写入仓库文档，个人协作偏好写入 Claude auto-memory，不要只保留在聊天记录里。
 - 注释、文档、说明性文字默认使用中文，除非用户明确要求使用其他语言。
 
 ## 重要提醒
