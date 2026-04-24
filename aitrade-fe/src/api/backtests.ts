@@ -66,6 +66,10 @@ export function runBacktest(payload: {
   return post<BacktestJobItem>('/api/backtests/run', payload)
 }
 
+export function stopBacktest(id: number) {
+  return post<BacktestJobItem>('/api/backtests/stop', { id })
+}
+
 export function pageBacktests(payload: {
   offset: number
   size: number

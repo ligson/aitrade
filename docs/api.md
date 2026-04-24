@@ -189,6 +189,7 @@
 返回历史数据管理与回测页所需的基础配置，包括：
 
 - `supportedSymbols`
+- `supportedTimeframes`
 - `defaultSymbol`
 - `defaultTimeframe`
 - `dataFormatOhlcv`
@@ -276,19 +277,114 @@
 }
 ```
 
-当前回测优先按历史文件发起，不再要求前端手工传 `timerange`。
+当前回测优先按历史文件发起，不再要求前端手工传 `timerange`。前端点击“开始回测”后会先展示确认弹窗，用户确认后才真正调用该接口。
+
+### `POST /api/backtests/stop`
+
+请求体：
+
+```json
+{
+  "id": 4
+}
+```
+
+用于对运行中的回测任务发起协作式停止。接口成功后任务会先进入 `stop_requested`，随后由回测线程主动收敛为 `stopped`。
 
 ### `POST /api/backtests/page`
 
-分页查询回测任务列表。
+分页查询回测任务列表。当前任务项会额外返回：
+
+- `stopRequestedAt`
+- `progressCurrent`
+- `progressTotal`
+- `progressPercent`
+- `estimatedFinishAt`
+- `canStop`
+
+状态枚举当前至少包含：
+
+- `pending`
+- `running`
+- `stop_requested`
+- `stopped`
+- `success`
+- `failed`
+- `unsupported`
 
 ### `POST /api/backtests/detail`
 
-根据任务 ID 查询回测详情。
+根据任务 ID 查询回测详情，返回字段与任务列表一致，并包含任务参数、数据来源、错误信息与成交明细查询所需主键。
 
 ### `POST /api/backtests/trades`
 
 分页查询回测成交明细。
+
+## 系统设置与系统日志接口
+
+### `POST /api/system/settings`
+
+返回系统级只读信息，当前至少包含：
+
+- `backtestDataDir`
+- `freqtradeUserDataDir`
+- `appLogDir`
+- `defaultTimeframe`
+- `dataFormatOhlcv`
+- `exportArchiveFormat`
+- `downloadTimerange`
+
+其中目录字段会尽量返回绝对路径，便于直接在管理台展示。
+
+### `POST /api/system/logs/files`
+
+请求体：
+
+```json
+{
+  "offset": 0,
+  "size": 20,
+  "keyword": "trade",
+  "type": "trade"
+}
+```
+
+分页返回日志文件列表，当前每项至少包含：
+
+- `filename`
+- `path`
+- `type`
+- `size`
+- `modifiedAt`
+
+其中 `type` 当前区分为：
+
+- `app`
+- `trade`
+
+### `POST /api/system/logs/content`
+
+请求体：
+
+```json
+{
+  "filename": "trade_2026-04-24-08.log",
+  "tailLines": 200
+}
+```
+
+返回指定日志文件最后若干行内容，当前至少包含：
+
+- `filename`
+- `path`
+- `type`
+- `size`
+- `modifiedAt`
+- `tailLines`
+- `content`
+- `truncated`
+
+日志内容读取会限制在系统日志目录内，拒绝路径穿越与非 `.log` 文件读取。
 
 ## 当前鉴权约束
 

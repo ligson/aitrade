@@ -6,8 +6,12 @@ from logging.handlers import TimedRotatingFileHandler
 import colorlog
 
 
+def resolve_log_dir() -> str:
+    return os.path.join(os.getcwd(), "logs")
+
+
 def config_log():
-    log_dir = os.path.join(os.getcwd(), "logs")
+    log_dir = resolve_log_dir()
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 

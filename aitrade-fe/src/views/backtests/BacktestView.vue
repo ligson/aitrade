@@ -40,17 +40,10 @@
           </a-form-item>
         </div>
         <a-space wrap>
-          <a-button type="primary" :loading="runLoading" :disabled="!runForm.strategyProfileId || !runForm.dataFile" @click="handleRunBacktest">开始回测</a-button>
+          <a-button type="primary" :loading="runLoading" :disabled="!runForm.strategyProfileId || !runForm.dataFile" @click="openRunConfirm">开始回测</a-button>
           <a-button @click="goToHistoryData">管理历史数据</a-button>
           <a-button @click="loadJobs">刷新任务</a-button>
         </a-space>
-        <a-alert
-          style="margin-top: 12px"
-          type="info"
-          show-icon
-          :message="selectedDataFile ? '当前已选择历史文件' : '请先选择历史文件'"
-          :description="selectedDataFileDescription"
-        />
         <a-alert
           v-if="unsupportedProfiles.length > 0"
           style="margin-top: 12px"
@@ -96,12 +89,25 @@
           <template v-else-if="column.key === 'tradeCount'">
             {{ record.summary.tradeCount ?? '-' }}
           </template>
+          <template v-else-if="column.key === 'estimatedFinishAt'">
+            {{ formatDateTime(record.estimatedFinishAt) }}
+          </template>
           <template v-else-if="column.key === 'createdAt' || column.key === 'finishedAt'">
             {{ formatDateTime(text) }}
           </template>
           <template v-else-if="column.key === 'actions'">
             <a-space size="small" wrap>
               <a-button type="link" @click="openDetail(record)">详情</a-button>
+              <a-popconfirm
+                v-if="record.canStop"
+                title="确认停止这个回测任务吗？"
+                ok-text="停止"
+                cancel-text="取消"
+                @confirm="handleStopJob(record)"
+              >
+                <a-button type="link" danger>停止</a-button>
+              </a-popconfirm>
+              <a-button v-else-if="record.status === 'stop_requested'" type="link" disabled>停止中</a-button>
             </a-space>
           </template>
           <template v-else>
@@ -111,8 +117,34 @@
       </a-table>
     </a-space>
 
+    <a-modal v-model:open="runConfirmOpen" title="确认开始回测" ok-text="确认开始" cancel-text="取消" :confirm-loading="runLoading" @ok="confirmRunBacktest">
+      <a-descriptions :column="1" bordered size="small">
+        <a-descriptions-item label="策略配置">{{ selectedProfile?.name || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="策略类型">{{ selectedProfile?.strategyType || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="历史文件">{{ selectedDataFile?.filename || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="交易对">{{ selectedDataFile?.symbol || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="周期">{{ selectedDataFile?.timeframe || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="文件时间范围">{{ selectedTimerangeLabel }}</a-descriptions-item>
+        <a-descriptions-item label="初始资金">{{ formatNumber(runForm.initialBalance) }}</a-descriptions-item>
+        <a-descriptions-item label="手续费率">{{ formatPercent(runForm.feeRate) }}</a-descriptions-item>
+      </a-descriptions>
+    </a-modal>
+
     <a-drawer v-model:open="detailOpen" title="回测详情" width="980">
       <template v-if="detailJob">
+        <a-space style="margin-bottom: 16px" v-if="detailJob.canStop || detailJob.status === 'stop_requested'">
+          <a-popconfirm
+            v-if="detailJob.canStop"
+            title="确认停止这个回测任务吗？"
+            ok-text="停止"
+            cancel-text="取消"
+            @confirm="handleStopJob(detailJob)"
+          >
+            <a-button danger>停止任务</a-button>
+          </a-popconfirm>
+          <a-button v-else type="default" disabled>停止中</a-button>
+        </a-space>
+
         <a-descriptions :column="2" bordered size="small">
           <a-descriptions-item label="策略配置">{{ detailJob.profileName }}</a-descriptions-item>
           <a-descriptions-item label="策略类型">{{ detailJob.strategyType }}</a-descriptions-item>
@@ -128,6 +160,10 @@
           <a-descriptions-item label="手续费率">{{ formatPercent(detailJob.feeRate) }}</a-descriptions-item>
           <a-descriptions-item label="任务创建时间">{{ formatDateTime(detailJob.createdAt) }}</a-descriptions-item>
           <a-descriptions-item label="任务完成时间">{{ formatDateTime(detailJob.finishedAt) }}</a-descriptions-item>
+          <a-descriptions-item label="预计完成时间">{{ formatDateTime(detailJob.estimatedFinishAt) }}</a-descriptions-item>
+          <a-descriptions-item label="停止请求时间">{{ formatDateTime(detailJob.stopRequestedAt) }}</a-descriptions-item>
+          <a-descriptions-item label="当前进度">{{ progressLabel(detailJob) }}</a-descriptions-item>
+          <a-descriptions-item label="进度百分比">{{ progressPercentLabel(detailJob) }}</a-descriptions-item>
         </a-descriptions>
 
         <a-alert v-if="detailJob.errorMessage" style="margin-top: 16px" type="error" show-icon :message="detailJob.errorMessage" />
@@ -152,15 +188,22 @@
         </a-descriptions>
 
         <a-alert v-if="detailDefinition" style="margin-top: 16px" type="info" show-icon :message="detailDefinition.displayName" :description="detailDefinition.description" />
-        <StrategyParamForm
-          v-if="detailDefinition"
-          style="margin-top: 16px"
-          :schema="detailDefinition.paramSchema"
-          :model-value="detailJob.params"
-        />
 
+        <a-descriptions v-if="detailParamItems.length > 0" :column="2" bordered size="small" style="margin-top: 16px">
+          <a-descriptions-item v-for="item in detailParamItems" :key="item.field" :label="item.label">
+            {{ item.value }}
+          </a-descriptions-item>
+        </a-descriptions>
+
+        <a-typography-title :level="5" style="margin-top: 16px; margin-bottom: 12px">成交明细</a-typography-title>
+        <a-alert
+          v-if="!detailTradesLoading && detailTradePagination.total === 0"
+          type="info"
+          show-icon
+          message="当前暂无成交记录"
+        />
         <a-table
-          style="margin-top: 16px"
+          v-else
           :data-source="detailTrades"
           :columns="tradeColumns"
           row-key="id"
@@ -194,11 +237,10 @@ import { message } from 'ant-design-vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { fetchBacktestDataOptions, fetchBacktestDetail, pageBacktestDataFiles, pageBacktests, pageBacktestTrades, runBacktest } from '@/api/backtests'
+import { fetchBacktestDataOptions, fetchBacktestDetail, pageBacktestDataFiles, pageBacktests, pageBacktestTrades, runBacktest, stopBacktest } from '@/api/backtests'
 import { fetchStrategyDefinitions, fetchStrategyProfiles } from '@/api/strategies'
-import StrategyParamForm from '@/components/StrategyParamForm.vue'
 import type { BacktestDataFileItem, BacktestDataOptions, BacktestJobItem, BacktestTradeItem } from '@/types/backtest'
-import type { StrategyDefinition, StrategyProfile } from '@/types/strategy'
+import type { StrategyDefinition, StrategyFieldSchema, StrategyProfile } from '@/types/strategy'
 
 const route = useRoute()
 const router = useRouter()
@@ -206,6 +248,7 @@ const loading = ref(false)
 const runLoading = ref(false)
 const detailOpen = ref(false)
 const detailTradesLoading = ref(false)
+const runConfirmOpen = ref(false)
 const rows = ref<BacktestJobItem[]>([])
 const definitions = ref<StrategyDefinition[]>([])
 const profiles = ref<StrategyProfile[]>([])
@@ -216,6 +259,7 @@ const pollTimer = ref<number | null>(null)
 
 const options = reactive<BacktestDataOptions>({
   supportedSymbols: [],
+  supportedTimeframes: [],
   defaultSymbol: 'BTC/USDT',
   defaultTimeframe: '15m',
   dataFormatOhlcv: 'jsongz',
@@ -252,6 +296,8 @@ const detailTradePagination = reactive({
 const statusOptions = [
   { label: '待执行', value: 'pending' },
   { label: '运行中', value: 'running' },
+  { label: '停止中', value: 'stop_requested' },
+  { label: '已停止', value: 'stopped' },
   { label: '成功', value: 'success' },
   { label: '失败', value: 'failed' },
   { label: '不支持', value: 'unsupported' },
@@ -262,12 +308,13 @@ const columns = [
   { title: '策略配置', dataIndex: 'profileName', key: 'profileName', width: 180 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 120 },
   { title: '数据来源', key: 'dataSource', width: 240 },
+  { title: '预计完成时间', dataIndex: 'estimatedFinishAt', key: 'estimatedFinishAt', width: 180 },
   { title: '收益率', key: 'totalReturn', width: 120 },
   { title: '最大回撤', key: 'maxDrawdown', width: 120 },
   { title: '交易数', key: 'tradeCount', width: 120 },
   { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
   { title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 180 },
-  { title: '操作', key: 'actions', width: 100 },
+  { title: '操作', key: 'actions', width: 180 },
 ]
 
 const tradeColumns = [
@@ -284,17 +331,30 @@ const supportedProfiles = computed(() => profiles.value.filter((item) => item.de
 const unsupportedProfiles = computed(() => profiles.value.filter((item) => item.definition && !item.definition.backtestSupported))
 const detailDefinition = computed(() => definitions.value.find((item) => item.strategyType === detailJob.value?.strategyType))
 const selectedDataFile = computed(() => dataFiles.value.find((item) => item.filename === runForm.dataFile) || null)
+const selectedProfile = computed(() => profiles.value.find((item) => item.id === runForm.strategyProfileId) || null)
 const selectedTimerangeLabel = computed(() => {
   if (!selectedDataFile.value) {
     return '-'
   }
   return `${formatDateTime(selectedDataFile.value.timerangeFrom)} ~ ${formatDateTime(selectedDataFile.value.timerangeTo)}`
 })
-const selectedDataFileDescription = computed(() => {
-  if (!selectedDataFile.value) {
-    return '请选择历史数据文件后再发起回测；如暂无文件，请先去“历史数据管理”页面下载或导入。'
+const detailParamItems = computed(() => {
+  if (!detailJob.value) {
+    return []
   }
-  return `文件名：${selectedDataFile.value.filename}；格式：${selectedDataFile.value.format}；大小：${formatFileSize(selectedDataFile.value.size)}；范围：${selectedTimerangeLabel.value}`
+  const schema = detailDefinition.value?.paramSchema || []
+  if (schema.length > 0) {
+    return schema.map((field) => ({
+      field: field.field,
+      label: field.label,
+      value: formatParamValue(field, detailJob.value?.params[field.field]),
+    }))
+  }
+  return Object.entries(detailJob.value.params).map(([field, value]) => ({
+    field,
+    label: field,
+    value: formatFallbackValue(value),
+  }))
 })
 
 function filterSelectOption(input: string, option?: { children?: unknown; value?: unknown }) {
@@ -344,6 +404,26 @@ function formatFileSize(value: number | null | undefined) {
   return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
+function formatFallbackValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '-'
+  }
+  if (typeof value === 'boolean') {
+    return value ? '是' : '否'
+  }
+  return String(value)
+}
+
+function formatParamValue(field: StrategyFieldSchema, value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '-'
+  }
+  if (field.type === 'boolean') {
+    return Boolean(value) ? '是' : '否'
+  }
+  return String(value)
+}
+
 function statusLabel(value: string) {
   return statusOptions.find((item) => item.value === value)?.label || value
 }
@@ -357,6 +437,12 @@ function statusColor(value: string) {
   }
   if (value === 'pending') {
     return 'gold'
+  }
+  if (value === 'stop_requested') {
+    return 'orange'
+  }
+  if (value === 'stopped') {
+    return 'default'
   }
   if (value === 'failed') {
     return 'red'
@@ -372,6 +458,20 @@ function backtestDataSourceLabel(job: BacktestJobItem) {
     return [job.dataSource.symbol, job.dataSource.timeframe, job.dataSource.timerange].filter(Boolean).join(' / ') || '-'
   }
   return '-'
+}
+
+function progressLabel(job: BacktestJobItem | null) {
+  if (!job || job.progressCurrent === null || job.progressCurrent === undefined || job.progressTotal === null || job.progressTotal === undefined) {
+    return '-'
+  }
+  return `${job.progressCurrent} / ${job.progressTotal}`
+}
+
+function progressPercentLabel(job: BacktestJobItem | null) {
+  if (!job || job.progressPercent === null || job.progressPercent === undefined) {
+    return '-'
+  }
+  return `${job.progressPercent.toFixed(2)}%`
 }
 
 async function loadDefinitionsAndProfiles() {
@@ -447,23 +547,38 @@ function handleDataFileChange() {
   }
 }
 
-async function handleRunBacktest() {
+function validateRunForm() {
   if (!runForm.strategyProfileId) {
     message.warning('请先选择策略配置')
-    return
+    return false
   }
   if (!runForm.dataFile) {
     message.warning('请先选择历史文件')
+    return false
+  }
+  return true
+}
+
+function openRunConfirm() {
+  if (!validateRunForm()) {
+    return
+  }
+  runConfirmOpen.value = true
+}
+
+async function confirmRunBacktest() {
+  if (!validateRunForm()) {
     return
   }
   runLoading.value = true
   try {
     const job = await runBacktest({
-      strategyProfileId: runForm.strategyProfileId,
+      strategyProfileId: runForm.strategyProfileId!,
       dataFile: runForm.dataFile,
       initialBalance: runForm.initialBalance,
       feeRate: runForm.feeRate,
     })
+    runConfirmOpen.value = false
     message.success(job.status === 'unsupported' ? '该策略暂不支持离线回测' : '回测任务已创建')
     await loadJobs()
     if (job.status !== 'unsupported') {
@@ -471,6 +586,16 @@ async function handleRunBacktest() {
     }
   } finally {
     runLoading.value = false
+  }
+}
+
+async function handleStopJob(record: BacktestJobItem) {
+  const job = await stopBacktest(record.id)
+  message.success(job.status === 'stop_requested' ? '停止请求已发送' : '任务已更新')
+  await loadJobs()
+  if (detailJob.value?.id === record.id) {
+    detailJob.value = await fetchBacktestDetail(record.id)
+    await loadDetailTrades()
   }
 }
 
@@ -508,7 +633,7 @@ async function openDetail(record: BacktestJobItem) {
 }
 
 function ensurePolling() {
-  const hasRunning = rows.value.some((item) => item.status === 'pending' || item.status === 'running')
+  const hasRunning = rows.value.some((item) => item.status === 'pending' || item.status === 'running' || item.status === 'stop_requested')
   if (!hasRunning) {
     stopPolling()
     return
@@ -518,7 +643,7 @@ function ensurePolling() {
   }
   pollTimer.value = window.setInterval(async () => {
     await loadJobs()
-    if (detailJob.value && (detailJob.value.status === 'pending' || detailJob.value.status === 'running')) {
+    if (detailJob.value && (detailJob.value.status === 'pending' || detailJob.value.status === 'running' || detailJob.value.status === 'stop_requested')) {
       detailJob.value = await fetchBacktestDetail(detailJob.value.id)
       await loadDetailTrades()
     }
@@ -546,7 +671,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .page-card {
-  height: 100%;
+  min-height: 100%;
 }
 
 .run-form {

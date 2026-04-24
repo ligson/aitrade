@@ -28,6 +28,7 @@ export interface BacktestDataStatus {
 
 export interface BacktestDataOptions {
   supportedSymbols: string[]
+  supportedTimeframes: string[]
   defaultSymbol: string
   defaultTimeframe: string
   dataFormatOhlcv: string
@@ -97,6 +98,12 @@ export interface BacktestJobItem {
   createdAt: string
   startedAt?: string | null
   finishedAt?: string | null
+  stopRequestedAt?: string | null
+  progressCurrent?: number | null
+  progressTotal?: number | null
+  progressPercent?: number | null
+  estimatedFinishAt?: string | null
+  canStop?: boolean
 }
 
 export interface BacktestTradeItem {

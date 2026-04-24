@@ -39,6 +39,11 @@ class BacktestJobModel(Base):
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     started_at: Mapped[Optional[str]] = mapped_column(String)
     finished_at: Mapped[Optional[str]] = mapped_column(String)
+    stop_requested_at: Mapped[Optional[str]] = mapped_column(String)
+    progress_current: Mapped[Optional[int]] = mapped_column(Integer)
+    progress_total: Mapped[Optional[int]] = mapped_column(Integer)
+    estimated_finish_at: Mapped[Optional[str]] = mapped_column(String)
+    last_progress_at: Mapped[Optional[str]] = mapped_column(String)
 
 
 class BacktestTradeModel(Base):

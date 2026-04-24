@@ -59,6 +59,7 @@ DEFAULT_BACKTEST_CONFIG = {
     'data_dir': './.aitrade/backtest-data',
     'user_data_dir': './.aitrade/freqtrade-user-data',
     'supported_symbols': ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
+    'supported_timeframes': ['5m', '15m', '30m', '1h', '4h', '1d'],
     'default_symbol': 'BTC/USDT',
     'default_timeframe': '15m',
     'download_timerange': '20180101-',
@@ -289,6 +290,10 @@ class Config:
             self.backtest_config.get('supported_symbols'),
             'app.backtest.supported_symbols',
         )
+        self.backtest_config['supported_timeframes'] = _require_string_list(
+            self.backtest_config.get('supported_timeframes'),
+            'app.backtest.supported_timeframes',
+        )
         self.backtest_config['default_symbol'] = _require_non_empty_string(
             self.backtest_config.get('default_symbol'),
             'app.backtest.default_symbol',
@@ -299,6 +304,8 @@ class Config:
             self.backtest_config.get('default_timeframe'),
             'app.backtest.default_timeframe',
         )
+        if self.backtest_config['default_timeframe'] not in self.backtest_config['supported_timeframes']:
+            raise ConfigValidationError('配置项 app.backtest.default_timeframe 必须包含在 app.backtest.supported_timeframes 中')
         self.backtest_config['download_timerange'] = _require_non_empty_string(
             self.backtest_config.get('download_timerange'),
             'app.backtest.download_timerange',

@@ -3,8 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from typing import Callable
 
 from ..strategies.btc_spot_breakout_strategy import BTCSpotBreakoutStrategy
+
+
+class BacktestStoppedError(Exception):
+    pass
 
 
 @dataclass
@@ -33,6 +38,8 @@ class BacktestEngine:
         strategy_params: dict[str, Any],
         timerange_from: str,
         timerange_to: str,
+        should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> dict[str, Any]:
         strategy = BTCSpotBreakoutStrategy(strategy_params)
         required_history = strategy.get_required_history()
@@ -50,6 +57,19 @@ class BacktestEngine:
         closes: list[float] = []
         volumes: list[float] = []
 
+        total_bars = 0
+        for row in bars:
+            if not isinstance(row, list) or len(row) < 6:
+                continue
+            timestamp_ms = int(row[0])
+            bar_time = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
+            if bar_time < timerange_from or bar_time > timerange_to:
+                continue
+            total_bars += 1
+
+        processed_bars = 0
+        progress_interval = 50
+
         for row in bars:
             if not isinstance(row, list) or len(row) < 6:
                 continue
@@ -64,12 +84,27 @@ class BacktestEngine:
             if bar_time < timerange_from or bar_time > timerange_to:
                 continue
 
+            processed_bars += 1
             timestamps.append(bar_time)
             opens.append(open_price)
             highs.append(high_price)
             lows.append(low_price)
             closes.append(close_price)
             volumes.append(volume)
+
+            if on_progress and (
+                processed_bars == 1
+                or processed_bars % progress_interval == 0
+                or processed_bars == total_bars
+            ):
+                on_progress(processed_bars, total_bars)
+
+            if should_stop and (
+                processed_bars == 1
+                or processed_bars % progress_interval == 0
+                or processed_bars == total_bars
+            ) and should_stop():
+                raise BacktestStoppedError('用户已停止任务')
 
             if len(closes) < required_history:
                 equity = balance + ((position['amount'] * close_price) if position else 0.0)

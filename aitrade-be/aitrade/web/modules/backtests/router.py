@@ -48,6 +48,10 @@ class BacktestRunRequest(BaseModel):
     feeRate: float = 0.001
 
 
+class BacktestStopRequest(BaseModel):
+    id: int
+
+
 class BacktestPageRequest(BaseModel):
     offset: int = 0
     size: int = 20
@@ -149,6 +153,16 @@ def run_backtest(
 ):
     service = BacktestService(config)
     return success_response(service.create_job(payload.model_dump(), current_user=current_user))
+
+
+@router.post('/stop')
+def stop_backtest(
+    payload: BacktestStopRequest,
+    config: Config = Depends(get_config),
+    _: dict = Depends(get_current_user),
+):
+    service = BacktestService(config)
+    return success_response(service.stop_job(payload.id))
 
 
 @router.post('/page')

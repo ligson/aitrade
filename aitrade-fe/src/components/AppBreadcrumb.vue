@@ -1,9 +1,8 @@
 <template>
   <div class="app-breadcrumb">
     <a-breadcrumb>
-      <a-breadcrumb-item v-for="(item, index) in items" :key="item.path">
-        <RouterLink v-if="index < items.length - 1" :to="item.path">{{ item.title }}</RouterLink>
-        <span v-else class="app-breadcrumb-current">{{ item.title }}</span>
+      <a-breadcrumb-item v-for="(item, index) in items" :key="`${item.title}-${index}`">
+        <span :class="index === items.length - 1 ? 'app-breadcrumb-current' : 'app-breadcrumb-parent'">{{ item.title }}</span>
       </a-breadcrumb-item>
     </a-breadcrumb>
   </div>
@@ -15,14 +14,17 @@ import { useRoute } from 'vue-router'
 
 const route = useRoute()
 
-const items = computed(() =>
-  route.matched
+const items = computed(() => {
+  const breadcrumb = route.meta.breadcrumb
+  if (Array.isArray(breadcrumb) && breadcrumb.length > 0) {
+    return breadcrumb.map((item) => ({ title: String(item) }))
+  }
+  return route.matched
     .filter((record) => typeof record.meta.title === 'string' && record.meta.title)
     .map((record) => ({
-      path: record.path.startsWith('/') ? record.path : `/${record.path}`,
       title: String(record.meta.title),
-    })),
-)
+    }))
+})
 </script>
 
 <style scoped>

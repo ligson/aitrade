@@ -10,6 +10,8 @@ const TradeLogView = () => import('@/views/trade-logs/TradeLogView.vue')
 const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.vue')
 const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
 const BacktestView = () => import('@/views/backtests/BacktestView.vue')
+const SystemSettingsView = () => import('@/views/system/SystemSettingsView.vue')
+const SystemLogView = () => import('@/views/system/SystemLogView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -28,11 +30,30 @@ const router = createRouter({
           redirect: '/trade-logs',
         },
         {
+          path: 'system-settings',
+          name: 'system-settings',
+          component: SystemSettingsView,
+          meta: {
+            title: '系统设置',
+            breadcrumb: ['系统管理', '系统设置'],
+          },
+        },
+        {
+          path: 'system-logs',
+          name: 'system-logs',
+          component: SystemLogView,
+          meta: {
+            title: '系统日志',
+            breadcrumb: ['系统管理', '系统日志'],
+          },
+        },
+        {
           path: 'users',
           name: 'users',
           component: UserListView,
           meta: {
             title: '用户维护',
+            breadcrumb: ['系统管理', '用户维护'],
           },
         },
         {
@@ -41,6 +62,7 @@ const router = createRouter({
           component: TradeLogView,
           meta: {
             title: '交易日志',
+            breadcrumb: ['交易中心', '交易日志'],
           },
         },
         {
@@ -49,6 +71,7 @@ const router = createRouter({
           component: StrategyConfigView,
           meta: {
             title: '策略配置',
+            breadcrumb: ['策略中心', '策略配置'],
           },
         },
         {
@@ -57,6 +80,7 @@ const router = createRouter({
           component: BacktestDataView,
           meta: {
             title: '历史数据管理',
+            breadcrumb: ['数据中心', '历史数据管理'],
           },
         },
         {
@@ -65,6 +89,7 @@ const router = createRouter({
           component: BacktestView,
           meta: {
             title: '策略回测',
+            breadcrumb: ['策略中心', '策略回测'],
           },
         },
       ],

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Thread
 from typing import Any
 
 from fastapi import UploadFile
+from sqlalchemy import inspect
+from sqlalchemy import text
 
 from ....config.config_file import Config
 from ....db import BacktestJobModel
@@ -15,8 +17,20 @@ from ....db import Base
 from ....db.session import get_engine
 from ....db.session import get_session_factory
 from ....trade.backtest.data_service import BacktestDataService
+from ....trade.backtest.engine import BacktestStoppedError
 from ...exceptions import NotFoundError
 from ...exceptions import ValidationError
+
+STATUS_PENDING = 'pending'
+STATUS_RUNNING = 'running'
+STATUS_STOP_REQUESTED = 'stop_requested'
+STATUS_STOPPED = 'stopped'
+STATUS_SUCCESS = 'success'
+STATUS_FAILED = 'failed'
+STATUS_UNSUPPORTED = 'unsupported'
+TERMINAL_STATUSES = {STATUS_STOPPED, STATUS_SUCCESS, STATUS_FAILED, STATUS_UNSUPPORTED}
+ACTIVE_STATUSES = {STATUS_PENDING, STATUS_RUNNING, STATUS_STOP_REQUESTED}
+STOP_MESSAGE = '用户已停止任务'
 
 
 class BacktestService:
@@ -30,6 +44,7 @@ class BacktestService:
         backtest_runtime_config['proxy_url'] = config.proxy_url
         self.data_service = BacktestDataService(backtest_runtime_config)
         Base.metadata.create_all(self.engine)
+        self._ensure_backtest_job_schema()
 
     def get_data_options(self) -> dict[str, Any]:
         return self.data_service.get_data_options()
@@ -123,9 +138,9 @@ class BacktestService:
             if profile is None:
                 raise NotFoundError('策略配置不存在')
             params = json.loads(profile.params_json)
-            now = datetime.now(timezone.utc).isoformat()
-            status = 'pending' if profile.strategy_type == 'btc_spot_breakout' else 'unsupported'
-            error_message = '' if status == 'pending' else '当前仅支持 btc_spot_breakout 策略离线回测'
+            now = self._now_iso()
+            status = STATUS_PENDING if profile.strategy_type == 'btc_spot_breakout' else STATUS_UNSUPPORTED
+            error_message = '' if status == STATUS_PENDING else '当前仅支持 btc_spot_breakout 策略离线回测'
             job = BacktestJobModel(
                 strategy_type=profile.strategy_type,
                 strategy_profile_id=profile.id,
@@ -144,25 +159,60 @@ class BacktestService:
                 created_by=str(current_user.get('username') or current_user.get('nickname') or current_user.get('id')),
                 created_at=now,
                 started_at=None,
-                finished_at=now if status == 'unsupported' else None,
+                finished_at=now if status == STATUS_UNSUPPORTED else None,
+                stop_requested_at=None,
+                progress_current=0 if status == STATUS_PENDING else None,
+                progress_total=None,
+                estimated_finish_at=None,
+                last_progress_at=None,
             )
             session.add(job)
             session.commit()
             session.refresh(job)
             job_id = job.id
 
-        if status == 'pending':
+        if status == STATUS_PENDING:
             thread = Thread(target=self._run_job, args=(job_id,), daemon=True)
             thread.start()
         return self.get_job_detail(job_id)
+
+    def stop_job(self, job_id: int) -> dict[str, Any]:
+        with self.Session() as session:
+            job = session.get(BacktestJobModel, job_id)
+            if job is None:
+                raise NotFoundError('回测任务不存在')
+            if job.status in TERMINAL_STATUSES or job.status == STATUS_STOP_REQUESTED:
+                return self._serialize_job(job)
+            if job.status not in {STATUS_PENDING, STATUS_RUNNING}:
+                return self._serialize_job(job)
+            now = self._now_iso()
+            job.status = STATUS_STOP_REQUESTED
+            job.stop_requested_at = now
+            session.commit()
+            session.refresh(job)
+            return self._serialize_job(job)
 
     def _run_job(self, job_id: int) -> None:
         with self.Session() as session:
             job = session.get(BacktestJobModel, job_id)
             if job is None:
                 return
-            job.status = 'running'
-            job.started_at = datetime.now(timezone.utc).isoformat()
+            now = self._now_iso()
+            if job.status == STATUS_STOP_REQUESTED:
+                job.status = STATUS_STOPPED
+                job.error_message = STOP_MESSAGE
+                job.finished_at = now
+                job.last_progress_at = now
+                session.commit()
+                return
+            if job.status != STATUS_PENDING:
+                return
+            job.status = STATUS_RUNNING
+            job.started_at = now
+            job.progress_current = 0
+            job.progress_total = None
+            job.estimated_finish_at = None
+            job.last_progress_at = now
             session.commit()
             strategy_type = job.strategy_type
             symbol = job.symbol
@@ -186,13 +236,23 @@ class BacktestService:
                 initial_balance=initial_balance,
                 fee_rate=fee_rate,
                 data_file=data_file or None,
+                should_stop=lambda: self._should_stop(job_id),
+                on_progress=lambda current, total: self._update_job_progress(job_id, current, total),
             )
             with self.Session() as session:
                 job = session.get(BacktestJobModel, job_id)
                 if job is None:
                     return
+                if job.status == STATUS_STOP_REQUESTED:
+                    job.status = STATUS_STOPPED
+                    job.error_message = STOP_MESSAGE
+                    job.finished_at = self._now_iso()
+                    job.estimated_finish_at = None
+                    job.last_progress_at = self._now_iso()
+                    session.commit()
+                    return
                 session.query(BacktestTradeModel).filter(BacktestTradeModel.job_id == job_id).delete()
-                now = datetime.now(timezone.utc).isoformat()
+                now = self._now_iso()
                 for item in result['trades']:
                     session.add(
                         BacktestTradeModel(
@@ -212,17 +272,35 @@ class BacktestService:
                 job.summary_json = json.dumps(result['summary'], ensure_ascii=False)
                 job.data_source_json = json.dumps(result.get('dataSource') or {}, ensure_ascii=False)
                 job.error_message = ''
-                job.status = 'success'
+                job.status = STATUS_SUCCESS
                 job.finished_at = now
+                job.progress_current = job.progress_total or job.progress_current
+                job.estimated_finish_at = None
+                job.last_progress_at = now
+                session.commit()
+        except BacktestStoppedError:
+            with self.Session() as session:
+                job = session.get(BacktestJobModel, job_id)
+                if job is None:
+                    return
+                now = self._now_iso()
+                job.status = STATUS_STOPPED
+                job.error_message = STOP_MESSAGE
+                job.finished_at = now
+                job.estimated_finish_at = None
+                job.last_progress_at = now
                 session.commit()
         except Exception as exc:
             with self.Session() as session:
                 job = session.get(BacktestJobModel, job_id)
                 if job is None:
                     return
-                job.status = 'failed'
+                now = self._now_iso()
+                job.status = STATUS_FAILED
                 job.error_message = str(exc)
-                job.finished_at = datetime.now(timezone.utc).isoformat()
+                job.finished_at = now
+                job.estimated_finish_at = None
+                job.last_progress_at = now
                 session.commit()
 
     def page_jobs(self, offset: int, size: int, keyword: str = '', status: str = '') -> tuple[int, list[dict[str, Any]]]:
@@ -276,8 +354,54 @@ class BacktestService:
             ]
             return total, rows
 
+    def _ensure_backtest_job_schema(self) -> None:
+        columns = {column['name'] for column in inspect(self.engine).get_columns('backtest_jobs')}
+        column_definitions = {
+            'stop_requested_at': 'VARCHAR',
+            'progress_current': 'INTEGER',
+            'progress_total': 'INTEGER',
+            'estimated_finish_at': 'VARCHAR',
+            'last_progress_at': 'VARCHAR',
+        }
+        missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
+        if not missing_columns:
+            return
+        with self.engine.begin() as connection:
+            for name, ddl in missing_columns.items():
+                connection.execute(text(f'ALTER TABLE backtest_jobs ADD COLUMN {name} {ddl}'))
+
+    def _should_stop(self, job_id: int) -> bool:
+        with self.Session() as session:
+            job = session.get(BacktestJobModel, job_id)
+            return bool(job and job.status == STATUS_STOP_REQUESTED)
+
+    def _update_job_progress(self, job_id: int, current: int, total: int) -> None:
+        with self.Session() as session:
+            job = session.get(BacktestJobModel, job_id)
+            if job is None or job.status not in {STATUS_RUNNING, STATUS_STOP_REQUESTED}:
+                return
+            now = datetime.now(timezone.utc)
+            job.progress_current = current
+            job.progress_total = total
+            job.last_progress_at = now.isoformat()
+            if job.started_at and current > 0 and total > current:
+                started_at = datetime.fromisoformat(job.started_at)
+                elapsed_seconds = max((now - started_at).total_seconds(), 0.0)
+                if elapsed_seconds > 0:
+                    remaining = total - current
+                    estimated_seconds = elapsed_seconds / current * remaining
+                    job.estimated_finish_at = (now + timedelta(seconds=estimated_seconds)).isoformat()
+            elif current >= total > 0:
+                job.estimated_finish_at = None
+            session.commit()
+
     @staticmethod
     def _serialize_job(model: BacktestJobModel) -> dict[str, Any]:
+        progress_current = model.progress_current
+        progress_total = model.progress_total
+        progress_percent = None
+        if progress_current is not None and progress_total and progress_total > 0:
+            progress_percent = round(progress_current / progress_total * 100, 2)
         return {
             'id': model.id,
             'strategyType': model.strategy_type,
@@ -298,4 +422,14 @@ class BacktestService:
             'createdAt': model.created_at,
             'startedAt': model.started_at,
             'finishedAt': model.finished_at,
+            'stopRequestedAt': model.stop_requested_at,
+            'progressCurrent': progress_current,
+            'progressTotal': progress_total,
+            'progressPercent': progress_percent,
+            'estimatedFinishAt': model.estimated_finish_at,
+            'canStop': model.status in {STATUS_PENDING, STATUS_RUNNING},
         }
+
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()

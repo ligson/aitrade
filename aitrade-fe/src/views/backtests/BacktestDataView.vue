@@ -11,7 +11,11 @@
             </a-select>
           </a-form-item>
           <a-form-item label="周期" class="filter-item">
-            <a-input v-model:value="downloadForm.timeframe" disabled />
+            <a-select v-model:value="downloadForm.timeframe" placeholder="请选择周期">
+              <a-select-option v-for="item in options.supportedTimeframes" :key="item" :value="item">
+                {{ item }}
+              </a-select-option>
+            </a-select>
           </a-form-item>
         </div>
         <a-space wrap>
@@ -22,13 +26,6 @@
           <a-button :disabled="selectedRowKeys.length === 0" @click="handleExportSelected">导出选中</a-button>
           <a-button @click="loadFiles">刷新列表</a-button>
         </a-space>
-        <a-alert
-          style="margin-top: 12px"
-          type="info"
-          show-icon
-          message="历史数据下载将从系统配置的最早范围下载到当前时点"
-          :description="downloadHint"
-        />
       </a-form>
 
       <a-form layout="inline">
@@ -95,11 +92,10 @@ import {
   downloadBacktestData,
   exportBacktestDataArchive,
   fetchBacktestDataOptions,
-  fetchBacktestDataStatus,
   importBacktestDataArchive,
   pageBacktestDataFiles,
 } from '@/api/backtests'
-import type { BacktestDataFileItem, BacktestDataOptions, BacktestDataStatus } from '@/types/backtest'
+import type { BacktestDataFileItem, BacktestDataOptions } from '@/types/backtest'
 
 const router = useRouter()
 const loading = ref(false)
@@ -116,20 +112,12 @@ const pagination = reactive({
 
 const options = reactive<BacktestDataOptions>({
   supportedSymbols: [],
+  supportedTimeframes: [],
   defaultSymbol: 'BTC/USDT',
   defaultTimeframe: '15m',
   dataFormatOhlcv: 'jsongz',
   downloadMode: 'full',
   archiveFormat: 'zip',
-})
-
-const currentStatus = reactive<BacktestDataStatus>({
-  available: false,
-  pair: '',
-  timeframe: '',
-  timerange: '',
-  path: '',
-  format: 'jsongz',
 })
 
 const downloadForm = reactive({
@@ -160,15 +148,6 @@ const rowSelection = computed(() => ({
     selectedRowKeys.value = keys.map((item) => String(item))
   },
 }))
-
-const downloadHint = computed(() => {
-  const parts = [
-    `默认周期：${downloadForm.timeframe || options.defaultTimeframe || '-'}`,
-    `落盘格式：${options.dataFormatOhlcv || '-'}`,
-    `下载目录：${currentStatus.dataDir || '-'}`,
-  ]
-  return parts.join('；')
-})
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
@@ -209,17 +188,9 @@ async function loadOptions() {
   if (!downloadForm.symbol) {
     downloadForm.symbol = data.defaultSymbol
   }
-  if (!downloadForm.timeframe) {
+  if (!options.supportedTimeframes.includes(downloadForm.timeframe)) {
     downloadForm.timeframe = data.defaultTimeframe
   }
-}
-
-async function loadStatus() {
-  const status = await fetchBacktestDataStatus({
-    symbol: downloadForm.symbol || options.defaultSymbol,
-    timeframe: downloadForm.timeframe || options.defaultTimeframe,
-  })
-  Object.assign(currentStatus, status)
 }
 
 async function loadFiles() {
@@ -243,13 +214,16 @@ async function handleDownloadData() {
     message.warning('请先选择交易对')
     return
   }
+  if (!downloadForm.timeframe) {
+    message.warning('请先选择周期')
+    return
+  }
   downloadLoading.value = true
   try {
-    const data = await downloadBacktestData({
+    await downloadBacktestData({
       symbol: downloadForm.symbol,
       timeframe: downloadForm.timeframe,
     })
-    Object.assign(currentStatus, data.status)
     message.success('历史数据下载完成')
     pagination.current = 1
     await loadFiles()
@@ -334,14 +308,13 @@ function handleTableChange(page: { current?: number }) {
 
 onMounted(async () => {
   await loadOptions()
-  await loadStatus()
   await loadFiles()
 })
 </script>
 
 <style scoped>
 .page-card {
-  height: 100%;
+  min-height: 100%;
 }
 
 .filter-form {

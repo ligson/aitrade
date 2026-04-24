@@ -165,6 +165,7 @@ bash query-trades.sh position
 - `POST /api/backtests/data/import`
 - `POST /api/backtests/data/delete`
 - `POST /api/backtests/run`
+- `POST /api/backtests/stop`
 - `POST /api/backtests/page`
 - `POST /api/backtests/detail`
 - `POST /api/backtests/trades`
@@ -173,8 +174,25 @@ bash query-trades.sh position
 
 - 历史数据下载不再让前端输入时间范围，统一按 `app.backtest.download_timerange` 下载到当前时点
 - 可选交易对来自 `app.backtest.supported_symbols`
+- 可选周期来自 `app.backtest.supported_timeframes`，默认支持 `5m / 15m / 30m / 1h / 4h / 1d`
 - 历史数据导入导出统一使用 zip 压缩包
 - 回测优先按历史文件发起，任务数据源会记录文件名、路径、格式、大小和文件时间范围
+- 回测任务创建前由前端先展示确认信息，用户确认后才调用 `/api/backtests/run`
+- 回测运行中支持通过 `/api/backtests/stop` 发起协作式停止，状态流转为 `pending -> running -> stop_requested -> stopped`
+- 回测任务会持续写入 `progress_current`、`progress_total`、`estimated_finish_at`、`last_progress_at`、`stop_requested_at`，旧 SQLite 表会在服务初始化时自动补齐新增列
+
+### 系统设置与系统日志接口
+
+- `POST /api/system/settings`
+- `POST /api/system/logs/files`
+- `POST /api/system/logs/content`
+
+当前 system 模块职责：
+
+- 返回历史数据目录、Freqtrade `user_data` 目录、日志目录与关键只读配置
+- 分页列出 `logs/` 目录下的日志文件，并区分应用日志与交易日志类型
+- 按文件读取最后若干行日志内容
+- 限制日志读取范围在 `logs/` 目录内，拒绝路径穿越与非 `.log` 文件访问
 
 ## 重要实现约束
 

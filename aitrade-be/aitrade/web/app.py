@@ -15,6 +15,7 @@ from .exceptions import ApiError
 from .modules.auth.router import router as auth_router
 from .modules.backtests.router import router as backtests_router
 from .modules.strategies.router import router as strategies_router
+from .modules.system.router import router as system_router
 from .modules.trade_logs.router import router as trade_logs_router
 from .modules.users.router import router as users_router
 
@@ -84,4 +85,5 @@ def create_app(config: Config) -> FastAPI:
     app.include_router(trade_logs_router, prefix='/api/trade-logs', tags=['trade-logs'])
     app.include_router(strategies_router, prefix='/api/strategies', tags=['strategies'])
     app.include_router(backtests_router, prefix='/api/backtests', tags=['backtests'])
+    app.include_router(system_router, prefix='/api/system', tags=['system'])
     return app

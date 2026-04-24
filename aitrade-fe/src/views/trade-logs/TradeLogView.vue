@@ -297,7 +297,7 @@ onMounted(async () => {
 
 <style scoped>
 .page-card {
-  height: 100%;
+  min-height: 100%;
 }
 
 .filter-form {

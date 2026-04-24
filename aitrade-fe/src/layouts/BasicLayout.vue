@@ -7,13 +7,27 @@
           <component :is="collapsed ? MenuUnfoldOutlined : MenuFoldOutlined" />
         </a-button>
       </div>
-      <a-menu theme="dark" mode="inline" :selected-keys="selectedKeys" :inline-collapsed="collapsed" @click="handleMenuClick">
-        <a-menu-item v-for="item in visibleMenuItems" :key="item.key">
+      <a-menu
+        theme="dark"
+        mode="inline"
+        :selected-keys="selectedKeys"
+        :open-keys="menuOpenKeys"
+        :inline-collapsed="collapsed"
+        @click="handleMenuClick"
+        @openChange="handleOpenChange"
+      >
+        <a-sub-menu v-for="group in visibleMenuGroups" :key="group.key">
           <template #icon>
-            <component :is="item.icon" />
+            <component :is="group.icon" />
           </template>
-          <span>{{ item.title }}</span>
-        </a-menu-item>
+          <template #title>{{ group.title }}</template>
+          <a-menu-item v-for="item in group.children" :key="item.key">
+            <template #icon>
+              <component :is="item.icon" />
+            </template>
+            <span>{{ item.title }}</span>
+          </a-menu-item>
+        </a-sub-menu>
       </a-menu>
     </a-layout-sider>
     <a-layout class="basic-layout-main">
@@ -37,35 +51,133 @@
 </template>
 
 <script setup lang="ts">
-import { CloudDownloadOutlined, FundOutlined, HistoryOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons-vue'
-import { computed, ref } from 'vue'
+import {
+  CloudDownloadOutlined,
+  DatabaseOutlined,
+  FileTextOutlined,
+  FundOutlined,
+  HistoryOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  SettingOutlined,
+  TeamOutlined,
+} from '@ant-design/icons-vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppBreadcrumb from '@/components/AppBreadcrumb.vue'
 import { useAuthStore } from '@/stores/auth'
 
+type MenuItem = {
+  key: string
+  title: string
+  icon: object
+  routePath: string
+  adminOnly?: boolean
+}
+
+type MenuGroup = {
+  key: string
+  title: string
+  icon: object
+  children: MenuItem[]
+}
+
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const collapsed = ref(false)
+const openKeys = ref<string[]>([])
 
-const menuItems = [
-  { key: 'trade-logs', title: '交易日志', icon: FundOutlined },
-  { key: 'strategies', title: '策略配置', icon: SettingOutlined },
-  { key: 'backtest-data', title: '历史数据管理', icon: CloudDownloadOutlined },
-  { key: 'backtests', title: '策略回测', icon: HistoryOutlined },
-  { key: 'users', title: '用户维护', icon: TeamOutlined, adminOnly: true },
+const menuGroups: MenuGroup[] = [
+  {
+    key: 'trading-center',
+    title: '交易中心',
+    icon: FundOutlined,
+    children: [
+      { key: 'trade-logs', title: '交易日志', icon: FundOutlined, routePath: '/trade-logs' },
+    ],
+  },
+  {
+    key: 'strategy-center',
+    title: '策略中心',
+    icon: HistoryOutlined,
+    children: [
+      { key: 'strategies', title: '策略配置', icon: SettingOutlined, routePath: '/strategies' },
+      { key: 'backtests', title: '策略回测', icon: HistoryOutlined, routePath: '/backtests' },
+    ],
+  },
+  {
+    key: 'data-center',
+    title: '数据中心',
+    icon: DatabaseOutlined,
+    children: [
+      { key: 'backtest-data', title: '历史数据管理', icon: CloudDownloadOutlined, routePath: '/backtest-data' },
+    ],
+  },
+  {
+    key: 'system-management',
+    title: '系统管理',
+    icon: TeamOutlined,
+    children: [
+      { key: 'system-settings', title: '系统设置', icon: SettingOutlined, routePath: '/system-settings', adminOnly: true },
+      { key: 'system-logs', title: '系统日志', icon: FileTextOutlined, routePath: '/system-logs', adminOnly: true },
+      { key: 'users', title: '用户维护', icon: TeamOutlined, routePath: '/users', adminOnly: true },
+    ],
+  },
 ]
 
-const visibleMenuItems = computed(() => menuItems.filter((item) => !item.adminOnly || auth.isAdmin))
-const selectedKeys = computed(() => [route.path.split('/')[1] || 'trade-logs'])
+const visibleMenuGroups = computed(() =>
+  menuGroups
+    .map((group) => ({
+      ...group,
+      children: group.children.filter((item) => !item.adminOnly || auth.isAdmin),
+    }))
+    .filter((group) => group.children.length > 0),
+)
+
+const currentMenuItem = computed(() => {
+  const currentPath = route.path || '/trade-logs'
+  for (const group of visibleMenuGroups.value) {
+    const item = group.children.find((child) => child.routePath === currentPath)
+    if (item) {
+      return item
+    }
+  }
+  return visibleMenuGroups.value[0]?.children[0] || null
+})
+
+const currentGroupKey = computed(() => {
+  const currentPath = route.path || '/trade-logs'
+  return visibleMenuGroups.value.find((group) => group.children.some((item) => item.routePath === currentPath))?.key || visibleMenuGroups.value[0]?.key || ''
+})
+
+const selectedKeys = computed(() => (currentMenuItem.value ? [currentMenuItem.value.key] : []))
+const menuOpenKeys = computed(() => (collapsed.value ? [] : Array.from(new Set([currentGroupKey.value, ...openKeys.value].filter(Boolean)))))
+
+watch(
+  currentGroupKey,
+  (value) => {
+    if (value && !openKeys.value.includes(value)) {
+      openKeys.value = [value, ...openKeys.value]
+    }
+  },
+  { immediate: true },
+)
 
 function toggleCollapsed() {
   collapsed.value = !collapsed.value
 }
 
+function handleOpenChange(keys: string[]) {
+  openKeys.value = keys
+}
+
 function handleMenuClick(event: { key: string }) {
-  router.push(`/${event.key}`)
+  const target = visibleMenuGroups.value.flatMap((group) => group.children).find((item) => item.key === event.key)
+  if (target) {
+    router.push(target.routePath)
+  }
 }
 
 async function handleLogout() {

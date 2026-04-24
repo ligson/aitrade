@@ -6,6 +6,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from typing import Callable
 
 from ...web.exceptions import ValidationError
 from .engine import BacktestEngine
@@ -17,6 +18,7 @@ class BacktestDataService:
         self.backtest_config = backtest_config
         self.freqtrade = FreqtradeClient(backtest_config)
         self.supported_symbols = list(backtest_config.get('supported_symbols') or [])
+        self.supported_timeframes = list(backtest_config.get('supported_timeframes') or [backtest_config['default_timeframe']])
         self.default_symbol = str(backtest_config['default_symbol'])
         self.default_timeframe = str(backtest_config['default_timeframe'])
         self.download_timerange = str(backtest_config['download_timerange'])
@@ -26,6 +28,7 @@ class BacktestDataService:
     def get_data_options(self) -> dict[str, Any]:
         return {
             'supportedSymbols': self.supported_symbols,
+            'supportedTimeframes': self.supported_timeframes,
             'defaultSymbol': self.default_symbol,
             'defaultTimeframe': self.default_timeframe,
             'dataFormatOhlcv': self.data_format_ohlcv,
@@ -37,13 +40,19 @@ class BacktestDataService:
         if pair not in self.supported_symbols:
             raise ValidationError(f'当前仅支持以下交易对历史数据：{"、".join(self.supported_symbols)}')
 
+    def ensure_supported_timeframe(self, timeframe: str) -> None:
+        if timeframe not in self.supported_timeframes:
+            raise ValidationError(f'当前仅支持以下周期历史数据：{"、".join(self.supported_timeframes)}')
+
     def get_data_status(self, pair: str | None = None, timeframe: str | None = None, timerange: str | None = None) -> dict[str, Any]:
         return self.freqtrade.get_data_status(pair=pair, timeframe=timeframe, timerange=timerange).to_dict()
 
     def download_data(self, pair: str | None = None, timeframe: str | None = None, timerange: str | None = None) -> dict[str, Any]:
         pair_value = str(pair or self.default_symbol).strip()
+        timeframe_value = str(timeframe or self.default_timeframe).strip()
         self.ensure_supported_symbol(pair_value)
-        return self.freqtrade.download_data(pair=pair_value, timeframe=timeframe, timerange=timerange or self.download_timerange)
+        self.ensure_supported_timeframe(timeframe_value)
+        return self.freqtrade.download_data(pair=pair_value, timeframe=timeframe_value, timerange=timerange or self.download_timerange)
 
     def load_bars(self, pair: str, timeframe: str) -> list[list[Any]]:
         rows = self.freqtrade.load_ohlcv_rows(pair=pair, timeframe=timeframe)
@@ -180,6 +189,7 @@ class BacktestDataService:
                     raise ValidationError('压缩包内文件路径非法')
                 parsed = self.parse_data_filename(name)
                 self.ensure_supported_symbol(parsed['symbol'])
+                self.ensure_supported_timeframe(parsed['timeframe'])
                 target = data_dir / name
                 if target.exists() and not overwrite:
                     skipped.append({'filename': name, 'reason': '文件已存在'})
@@ -208,6 +218,8 @@ class BacktestDataService:
         initial_balance: float,
         fee_rate: float,
         data_file: str | None = None,
+        should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> dict[str, Any]:
         if strategy_type != 'btc_spot_breakout':
             raise ValidationError('当前仅支持 btc_spot_breakout 策略离线回测')
@@ -220,6 +232,8 @@ class BacktestDataService:
             strategy_params=strategy_params,
             timerange_from=timerange_from,
             timerange_to=timerange_to,
+            should_stop=should_stop,
+            on_progress=on_progress,
         )
         if data_file:
             result['dataSource'] = self.inspect_data_file(data_file)
