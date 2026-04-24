@@ -210,19 +210,29 @@ bash deploy.sh chenws-japan
 - 执行后端 `bash package.sh`
 - 执行前端 `pnpm --dir ../aitrade-fe build`
 - 上传后端源码包到远端 `releases/`
-- 解压为版本目录并切换 `/data/aitrade/current`
-- 首次部署时创建 `/data/aitrade/shared/config.yaml`
+- 解压为版本目录并准备 `/data/aitrade/shared/config.yaml`
 - 在当前版本的 `aitrade-be/` 下把 `config.yaml` 软链到共享配置
-- 上传前端静态产物到 `/data/aitrade/current/aitrade-fe-dist/`
+- 上传前端静态产物到固定共享目录 `/data/aitrade/shared/public`
+- 切换 `/data/aitrade/current` 到新版本
+- 自动执行远端 `init-env.sh`、`stop-web.sh`、`start-web.sh`、`status-web.sh`
+- 自动校验 `/data/aitrade/shared/public/index.html` 与 `http://127.0.0.1:18080/health`
 
-部署后建议在远端执行：
+远端正式目录约定：
+
+- 当前后端版本：`/data/aitrade/current/aitrade-be`
+- 共享配置：`/data/aitrade/shared/config.yaml`
+- 前端静态目录：`/data/aitrade/shared/public`
+
+Nginx 静态站点根目录应固定指向 `/data/aitrade/shared/public`，不要指向某个具体 release 目录，也不要继续依赖 `/data/aitrade/current/aitrade-fe-dist`。
+
+首次把线上 Nginx 静态目录切到共享目录时，建议执行：
 
 ```bash
-cd /data/aitrade/current/aitrade-be
-bash init-env.sh
-bash start-web.sh
-bash status-web.sh
+nginx -t
+systemctl reload nginx
 ```
+
+如果远端启用了 SELinux，需确保 `/data/aitrade/shared/public` 被标记为 `httpd_sys_content_t`；当前部署脚本会自动尝试写入 `semanage fcontext` 并执行 `restorecon`。
 
 Web 服务默认监听 `app.web.port`，默认端口为 `18080`。
 

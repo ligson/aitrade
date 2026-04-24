@@ -4,7 +4,7 @@
       <div class="page-toolbar">
         <a-button type="primary" @click="openCreate">新增配置</a-button>
       </div>
-      <a-table :data-source="tableRows" :columns="columns" row-key="id" :pagination="false">
+      <a-table :data-source="tableRows" :columns="columns" row-key="id" :pagination="false" :scroll="{ x: 'max-content' }">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'strategyType'">
             {{ record.definition?.displayName || record.strategyType }}
@@ -102,9 +102,9 @@ const form = reactive<{ id?: number; strategyType: string; name: string; descrip
 })
 
 const columns = [
-  { title: '配置名称', dataIndex: 'name', key: 'name' },
+  { title: '配置名称', dataIndex: 'name', key: 'name', width: 220 },
   { title: '策略类型', dataIndex: 'strategyType', key: 'strategyType', width: 180 },
-  { title: '描述', dataIndex: 'description', key: 'description' },
+  { title: '描述', dataIndex: 'description', key: 'description', width: 260 },
   { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 100 },
   { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
   { title: '操作', key: 'actions', width: 180 },

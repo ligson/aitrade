@@ -12,7 +12,7 @@
         <a-button @click="resetFilters">重置</a-button>
       </a-space>
 
-      <a-table :data-source="rows" :columns="columns" row-key="filename" :loading="loading" :pagination="pagination" @change="handleTableChange">
+      <a-table :data-source="rows" :columns="columns" row-key="filename" :loading="loading" :pagination="pagination" :scroll="{ x: 'max-content' }" @change="handleTableChange">
         <template #bodyCell="{ column, record, text }">
           <template v-if="column.key === 'type'">
             <a-tag :color="record.type === 'trade' ? 'blue' : 'green'">{{ record.type === 'trade' ? '交易日志' : '应用日志' }}</a-tag>
@@ -85,7 +85,7 @@ const typeOptions = [
 ]
 
 const columns = [
-  { title: '文件名', dataIndex: 'filename', key: 'filename' },
+  { title: '文件名', dataIndex: 'filename', key: 'filename', width: 320 },
   { title: '日志类型', dataIndex: 'type', key: 'type', width: 120 },
   { title: '文件大小', dataIndex: 'size', key: 'size', width: 120 },
   { title: '最后修改时间', dataIndex: 'modifiedAt', key: 'modifiedAt', width: 180 },

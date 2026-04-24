@@ -6,7 +6,7 @@
         <a-button type="primary" @click="loadUsers">查询</a-button>
         <a-button @click="openCreate">新增用户</a-button>
       </a-space>
-      <a-table :data-source="rows" :columns="columns" :pagination="pagination" row-key="id" :loading="loading" @change="handleTableChange">
+      <a-table :data-source="rows" :columns="columns" :pagination="pagination" row-key="id" :loading="loading" :scroll="{ x: 'max-content' }" @change="handleTableChange">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'status'">
             <a-tag :color="record.status === 'active' ? 'green' : 'red'">{{ record.status }}</a-tag>
@@ -73,13 +73,13 @@ const editForm = reactive({
 })
 
 const columns = [
-  { title: '用户名', dataIndex: 'username', key: 'username' },
-  { title: '邮箱', dataIndex: 'email', key: 'email' },
-  { title: '昵称', dataIndex: 'nickname', key: 'nickname' },
-  { title: '状态', dataIndex: 'status', key: 'status' },
-  { title: '管理员', dataIndex: 'isAdmin', key: 'isAdmin' },
-  { title: '最近登录', dataIndex: 'lastLoginAt', key: 'lastLoginAt' },
-  { title: '操作', key: 'actions' },
+  { title: '用户名', dataIndex: 'username', key: 'username', width: 140 },
+  { title: '邮箱', dataIndex: 'email', key: 'email', width: 220 },
+  { title: '昵称', dataIndex: 'nickname', key: 'nickname', width: 140 },
+  { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
+  { title: '管理员', dataIndex: 'isAdmin', key: 'isAdmin', width: 100 },
+  { title: '最近登录', dataIndex: 'lastLoginAt', key: 'lastLoginAt', width: 180 },
+  { title: '操作', key: 'actions', width: 220 },
 ]
 
 const pagination = {

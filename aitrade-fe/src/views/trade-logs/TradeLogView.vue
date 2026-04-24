@@ -43,7 +43,7 @@
           <a-button @click="loadPositions">查看当前持仓</a-button>
         </a-space>
       </a-form>
-      <a-table :data-source="rows" :columns="columns" row-key="id" :loading="loading" :pagination="pagination" @change="handleTableChange">
+      <a-table :data-source="rows" :columns="columns" row-key="id" :loading="loading" :pagination="pagination" :scroll="{ x: 'max-content' }" @change="handleTableChange">
         <template #bodyCell="{ column, text }">
           <template v-if="column.key === 'created_at'">
             {{ formatDateTime(text) }}
@@ -67,7 +67,7 @@
       </a-table>
     </a-space>
     <a-drawer v-model:open="drawerOpen" title="当前持仓" width="720">
-      <a-table :data-source="positions" :columns="positionColumns" row-key="symbol" :pagination="false">
+      <a-table :data-source="positions" :columns="positionColumns" row-key="symbol" :pagination="false" :scroll="{ x: 'max-content' }">
         <template #bodyCell="{ column, text }">
           <template v-if="column.key === 'updated_at' || column.key === 'entry_time'">
             {{ formatDateTime(text) }}
@@ -140,17 +140,17 @@ const columns = [
   { title: '价格', dataIndex: 'market_price', key: 'market_price', width: 120 },
   { title: '数量', dataIndex: 'requested_amount', key: 'requested_amount', width: 120 },
   { title: '结果', dataIndex: 'result', key: 'result', width: 120 },
-  { title: '原因', dataIndex: 'result_reason', key: 'result_reason' },
+  { title: '原因', dataIndex: 'result_reason', key: 'result_reason', width: 260 },
 ]
 
 const positionColumns = [
-  { title: '交易对', dataIndex: 'symbol', key: 'symbol' },
-  { title: '策略', dataIndex: 'strategy', key: 'strategy' },
-  { title: '入场时间', dataIndex: 'entry_time', key: 'entry_time' },
-  { title: '入场价', dataIndex: 'entry_price', key: 'entry_price' },
-  { title: '数量', dataIndex: 'amount', key: 'amount' },
-  { title: '止损', dataIndex: 'stop_loss', key: 'stop_loss' },
-  { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at' },
+  { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
+  { title: '策略', dataIndex: 'strategy', key: 'strategy', width: 140 },
+  { title: '入场时间', dataIndex: 'entry_time', key: 'entry_time', width: 180 },
+  { title: '入场价', dataIndex: 'entry_price', key: 'entry_price', width: 120 },
+  { title: '数量', dataIndex: 'amount', key: 'amount', width: 120 },
+  { title: '止损', dataIndex: 'stop_loss', key: 'stop_loss', width: 120 },
+  { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 180 },
 ]
 
 const pagination = reactive({

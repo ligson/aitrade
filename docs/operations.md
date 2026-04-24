@@ -108,6 +108,31 @@ bash package.sh
 
 会在 `aitrade-be/dist/` 下生成带时间戳的源码包，并默认排除本地虚拟环境、日志与 `config.yaml`。
 
+## 远端部署
+
+```bash
+bash deploy.sh chenws-japan
+```
+
+当前正式部署约定：
+
+- 后端版本目录通过 `/data/aitrade/releases/<release>` 管理
+- 当前后端入口固定使用 `/data/aitrade/current/aitrade-be`
+- 共享配置固定为 `/data/aitrade/shared/config.yaml`
+- 前端静态目录固定为 `/data/aitrade/shared/public`
+
+部署脚本默认会自动完成：
+
+- 本地前端构建与后端打包
+- 远端上传、解压、切换 `current`
+- 前端静态资源全量更新到 `/data/aitrade/shared/public`
+- 远端执行 `init-env.sh`、`stop-web.sh`、`start-web.sh`、`status-web.sh`
+- 校验共享静态目录与本机 `http://127.0.0.1:18080/health`
+
+Nginx 静态站点根目录应固定指向 `/data/aitrade/shared/public`，不要指向具体 release 目录；`/api` 再反代到后端 Web 服务。
+
+如果服务器启用了 SELinux，还需要保证 `/data/aitrade/shared/public` 使用 `httpd_sys_content_t` 上下文；当前部署脚本会自动尝试执行 `semanage fcontext` 与 `restorecon`。
+
 ## 运行态目录
 
 后端运行态统一位于 `aitrade-be/`：

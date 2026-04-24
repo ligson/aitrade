@@ -72,7 +72,7 @@
         </a-form-item>
       </a-form>
 
-      <a-table :data-source="rows" :columns="columns" row-key="id" :loading="loading" :pagination="pagination" @change="handleTableChange">
+      <a-table :data-source="rows" :columns="columns" row-key="id" :loading="loading" :pagination="pagination" :scroll="{ x: 'max-content' }" @change="handleTableChange">
         <template #bodyCell="{ column, record, text }">
           <template v-if="column.key === 'status'">
             <a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag>
@@ -209,6 +209,7 @@
           row-key="id"
           :loading="detailTradesLoading"
           :pagination="detailTradePagination"
+          :scroll="{ x: 'max-content' }"
           @change="handleTradeTableChange"
         >
           <template #bodyCell="{ column, text, record }">
@@ -324,7 +325,7 @@ const tradeColumns = [
   { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 120 },
   { title: '手续费', dataIndex: 'fee', key: 'fee', width: 120 },
   { title: '盈亏', dataIndex: 'pnl', key: 'pnl', width: 120 },
-  { title: '原因', dataIndex: 'reason', key: 'reason' },
+  { title: '原因', dataIndex: 'reason', key: 'reason', width: 260 },
 ]
 
 const supportedProfiles = computed(() => profiles.value.filter((item) => item.definition?.backtestSupported))

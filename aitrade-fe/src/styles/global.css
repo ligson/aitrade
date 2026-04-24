@@ -76,3 +76,23 @@ body {
 .app-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(15, 23, 42, 0.32);
 }
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.ant-table-wrapper .ant-table-cell {
+  min-width: max-content;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td .ant-space {
+  white-space: normal;
+}

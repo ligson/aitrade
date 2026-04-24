@@ -54,6 +54,7 @@
         :loading="loading"
         :pagination="pagination"
         :row-selection="rowSelection"
+        :scroll="{ x: 'max-content' }"
         @change="handleTableChange"
       >
         <template #bodyCell="{ column, record, text }">
