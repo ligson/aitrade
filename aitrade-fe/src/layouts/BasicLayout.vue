@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { FundOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons-vue'
+import { CloudDownloadOutlined, FundOutlined, HistoryOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons-vue'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -52,6 +52,8 @@ const collapsed = ref(false)
 const menuItems = [
   { key: 'trade-logs', title: '交易日志', icon: FundOutlined },
   { key: 'strategies', title: '策略配置', icon: SettingOutlined },
+  { key: 'backtest-data', title: '历史数据管理', icon: CloudDownloadOutlined },
+  { key: 'backtests', title: '策略回测', icon: HistoryOutlined },
   { key: 'users', title: '用户维护', icon: TeamOutlined, adminOnly: true },
 ]
 

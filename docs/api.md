@@ -182,6 +182,114 @@
 
 删除策略配置。
 
+## 历史数据与回测接口
+
+### `POST /api/backtests/data/options`
+
+返回历史数据管理与回测页所需的基础配置，包括：
+
+- `supportedSymbols`
+- `defaultSymbol`
+- `defaultTimeframe`
+- `dataFormatOhlcv`
+- `downloadMode`
+- `archiveFormat`
+
+### `POST /api/backtests/data/catalog`
+
+请求体：
+
+```json
+{
+  "symbol": "BTC/USDT",
+  "timeframe": "15m",
+  "keyword": "BTC",
+  "offset": 0,
+  "size": 20
+}
+```
+
+分页返回历史数据文件列表，当前每项至少包含：
+
+- `filename`
+- `symbol`
+- `timeframe`
+- `format`
+- `path`
+- `size`
+- `modifiedAt`
+- `timerangeFrom`
+- `timerangeTo`
+
+### `POST /api/backtests/data/download`
+
+请求体：
+
+```json
+{
+  "symbol": "BTC/USDT",
+  "timeframe": "15m"
+}
+```
+
+当前不再让前端传下载时间范围，后端会统一按配置里的最早时间范围下载到当前时点。
+
+### `POST /api/backtests/data/export`
+
+请求体：
+
+```json
+{
+  "files": ["BTC_USDT-15m.json.gz"]
+}
+```
+
+返回 zip 二进制流，压缩包内会附带 `manifest.json`。
+
+### `POST /api/backtests/data/import`
+
+- `multipart/form-data`
+- 字段：
+  - `file`：zip 压缩包
+  - `overwrite`：是否覆盖同名文件
+
+### `POST /api/backtests/data/delete`
+
+请求体：
+
+```json
+{
+  "filename": "BTC_USDT-15m.json.gz"
+}
+```
+
+### `POST /api/backtests/run`
+
+请求体：
+
+```json
+{
+  "strategyProfileId": 1,
+  "dataFile": "BTC_USDT-15m.json.gz",
+  "initialBalance": 10000,
+  "feeRate": 0.001
+}
+```
+
+当前回测优先按历史文件发起，不再要求前端手工传 `timerange`。
+
+### `POST /api/backtests/page`
+
+分页查询回测任务列表。
+
+### `POST /api/backtests/detail`
+
+根据任务 ID 查询回测详情。
+
+### `POST /api/backtests/trades`
+
+分页查询回测成交明细。
+
 ## 当前鉴权约束
 
 - 登录后，前端通过 Bearer Token 调业务接口。

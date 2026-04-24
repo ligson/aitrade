@@ -148,8 +148,27 @@ bash query-trades.sh position
 - `api/users`：用户分页、创建、编辑、重置密码、状态切换
 - `api/trade-logs`：交易日志分页、当前持仓
 - `api/strategies`：策略定义、策略配置列表、保存、删除
+- `api/backtests`：历史数据管理、回测任务创建、任务详情与成交明细查询
 
 其中分页接口统一返回 `data.total`、`data.size`、`data.offset` 与 `data.data`。
+
+### 历史数据管理与文件回测
+
+- 历史数据管理统一复用 `api/backtests/data/*` 子接口，包含：
+  - `POST /api/backtests/data/options`
+  - `POST /api/backtests/data/catalog`
+  - `POST /api/backtests/data/download`
+  - `POST /api/backtests/data/export`
+  - `POST /api/backtests/data/import`
+  - `POST /api/backtests/data/delete`
+- 历史数据由 freqtrade CLI 下载到 `app.backtest.data_dir`
+- freqtrade 运行所需的 `user_data` 与最小 `config.json` 会由后端自动初始化到 `app.backtest.user_data_dir`
+- 前端不再让用户输入下载时间范围，下载统一按 `app.backtest.download_timerange` 从最早范围执行到当前时点
+- 历史数据管理页可选交易对来自 `app.backtest.supported_symbols`
+- 导入与导出统一使用 zip 压缩包；导出压缩包内会附带 `manifest.json`
+- 回测任务创建优先按历史文件发起，`data_source_json` 会记录文件名、路径、格式、大小和文件覆盖时间范围
+- 如果开启了 `app.http_client.proxy_enable`，回测历史数据下载会自动复用同一代理配置访问 Binance
+- 若仍出现证书校验失败，通常是本机代理链路或证书环境问题，不是回测目录路径问题
 
 ## 核心结构
 
@@ -177,6 +196,35 @@ bash query-trades.sh position
 ```bash
 bash package.sh
 ```
+
+## 远端部署
+
+当前已提供最小远端部署链路，默认通过本机 SSH 别名把版本发布到远端 `/data/aitrade`：
+
+```bash
+bash deploy.sh chenws-japan
+```
+
+部署脚本会完成：
+
+- 执行后端 `bash package.sh`
+- 执行前端 `pnpm --dir ../aitrade-fe build`
+- 上传后端源码包到远端 `releases/`
+- 解压为版本目录并切换 `/data/aitrade/current`
+- 首次部署时创建 `/data/aitrade/shared/config.yaml`
+- 在当前版本的 `aitrade-be/` 下把 `config.yaml` 软链到共享配置
+- 上传前端静态产物到 `/data/aitrade/current/aitrade-fe-dist/`
+
+部署后建议在远端执行：
+
+```bash
+cd /data/aitrade/current/aitrade-be
+bash init-env.sh
+bash start-web.sh
+bash status-web.sh
+```
+
+Web 服务默认监听 `app.web.port`，默认端口为 `18080`。
 
 ## 协作文档约定
 

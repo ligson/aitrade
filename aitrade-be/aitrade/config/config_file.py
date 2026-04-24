@@ -55,6 +55,18 @@ DEFAULT_WEB_CONFIG = {
     'init_admin': DEFAULT_WEB_INIT_ADMIN_CONFIG,
 }
 
+DEFAULT_BACKTEST_CONFIG = {
+    'data_dir': './.aitrade/backtest-data',
+    'user_data_dir': './.aitrade/freqtrade-user-data',
+    'supported_symbols': ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
+    'default_symbol': 'BTC/USDT',
+    'default_timeframe': '15m',
+    'download_timerange': '20180101-',
+    'freqtrade_bin': 'freqtrade',
+    'data_format_ohlcv': 'jsongz',
+    'export_archive_format': 'zip',
+}
+
 
 class ConfigValidationError(ValueError):
     pass
@@ -190,6 +202,7 @@ class Config:
 
         _require_bool(self.trade_persistence_config.get('enabled'), 'app.trade.persistence.enabled')
         database_url = persistence_overrides.get('database_url')
+        # sqlite_path 仅用于兼容旧配置，新的配置文件统一使用 database_url。
         if database_url is None and persistence_overrides.get('sqlite_path') is not None:
             sqlite_path = _require_non_empty_string(
                 persistence_overrides.get('sqlite_path'),
@@ -261,6 +274,51 @@ class Config:
         if not isinstance(remark, str):
             raise ConfigValidationError('配置项 app.web.init_admin.remark 必须是字符串')
         self.web_init_admin_config['remark'] = remark
+
+        backtest_overrides = app_cfg.get('backtest', {})
+        if backtest_overrides is None:
+            backtest_overrides = {}
+        backtest_overrides = _require_mapping(backtest_overrides, 'app.backtest')
+        self.backtest_config = merge_config(DEFAULT_BACKTEST_CONFIG, backtest_overrides)
+        self.backtest_config['data_dir'] = _require_non_empty_string(self.backtest_config.get('data_dir'), 'app.backtest.data_dir')
+        self.backtest_config['user_data_dir'] = _require_non_empty_string(
+            self.backtest_config.get('user_data_dir'),
+            'app.backtest.user_data_dir',
+        )
+        self.backtest_config['supported_symbols'] = _require_string_list(
+            self.backtest_config.get('supported_symbols'),
+            'app.backtest.supported_symbols',
+        )
+        self.backtest_config['default_symbol'] = _require_non_empty_string(
+            self.backtest_config.get('default_symbol'),
+            'app.backtest.default_symbol',
+        )
+        if self.backtest_config['default_symbol'] not in self.backtest_config['supported_symbols']:
+            raise ConfigValidationError('配置项 app.backtest.default_symbol 必须包含在 app.backtest.supported_symbols 中')
+        self.backtest_config['default_timeframe'] = _require_non_empty_string(
+            self.backtest_config.get('default_timeframe'),
+            'app.backtest.default_timeframe',
+        )
+        self.backtest_config['download_timerange'] = _require_non_empty_string(
+            self.backtest_config.get('download_timerange'),
+            'app.backtest.download_timerange',
+        )
+        self.backtest_config['freqtrade_bin'] = _require_non_empty_string(
+            self.backtest_config.get('freqtrade_bin'),
+            'app.backtest.freqtrade_bin',
+        )
+        self.backtest_config['data_format_ohlcv'] = _require_non_empty_string(
+            self.backtest_config.get('data_format_ohlcv'),
+            'app.backtest.data_format_ohlcv',
+        )
+        if self.backtest_config['data_format_ohlcv'] not in {'json', 'jsongz'}:
+            raise ConfigValidationError('配置项 app.backtest.data_format_ohlcv 只支持 json 或 jsongz')
+        self.backtest_config['export_archive_format'] = _require_non_empty_string(
+            self.backtest_config.get('export_archive_format'),
+            'app.backtest.export_archive_format',
+        )
+        if self.backtest_config['export_archive_format'] != 'zip':
+            raise ConfigValidationError('配置项 app.backtest.export_archive_format 当前只支持 zip')
 
         _require_positive_number(
             self.trade_strategy_gpt_config.get('min_confidence'),

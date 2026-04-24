@@ -5,7 +5,7 @@
 当前仓库采用前后端并存布局：
 
 - `aitrade-be/`：Python 后端，包含交易机器人、FastAPI Web API、配置、脚本与打包逻辑
-- `aitrade-fe/`：Vue 3 管理台，包含登录、用户维护、交易日志查询与策略配置页面
+- `aitrade-fe/`：Vue 3 管理台，包含登录、用户维护、交易日志查询、策略配置、历史数据管理与策略回测页面
 
 根目录保留了一组兼容脚本：
 
@@ -32,7 +32,7 @@ bash package.sh
 ### 运行入口
 
 - `aitrade-be/aitrade/__main__.py`：Bot 入口，负责初始化日志、加载配置、启动交易主循环
-- `aitrade-be/aitrade/bot_runner.py`：Web API 入口，负责启动 FastAPI + Uvicorn
+- `aitrade-be/aitrade/web_runner.py`：Web API 入口，负责启动 FastAPI + Uvicorn
 
 ### 交易主链路
 
@@ -86,6 +86,7 @@ FastAPI 应用位于：
 - `api/users`：用户分页、创建、更新、重置密码、状态切换
 - `api/trade-logs`：交易日志分页、当前持仓、筛选选项
 - `api/strategies`：策略定义、策略配置列表、保存、删除
+- `api/backtests`：历史数据管理、回测任务创建、任务详情与成交明细查询
 
 统一响应结构为：
 
@@ -119,6 +120,8 @@ FastAPI 应用位于：
 - `aitrade-fe/src/views/login/`：登录页
 - `aitrade-fe/src/views/trade-logs/`：交易日志页
 - `aitrade-fe/src/views/strategies/`：策略配置页
+- `aitrade-fe/src/views/backtests/BacktestDataView.vue`：历史数据管理页
+- `aitrade-fe/src/views/backtests/BacktestView.vue`：策略回测页
 - `aitrade-fe/src/views/users/`：用户管理页
 
 ## 本地联调关系

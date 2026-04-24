@@ -48,7 +48,16 @@ bash status.sh
 bash stop.sh
 ```
 
-当前后台脚本主要服务 Bot 主链路；Web API 本地调试更适合直接前台启动。
+### Web 专用脚本
+
+```bash
+cd aitrade-be
+bash start-web.sh
+bash status-web.sh
+bash stop-web.sh
+```
+
+当前仓库已经提供 Web 专用后台脚本；如需本地调试，也可以直接前台执行 `uv run python -m aitrade.web_runner`。
 
 ## 配置模型
 
@@ -146,6 +155,26 @@ bash query-trades.sh position
 - `POST /api/strategies/list`
 - `POST /api/strategies/save`
 - `POST /api/strategies/delete`
+
+### 历史数据与回测接口
+
+- `POST /api/backtests/data/options`
+- `POST /api/backtests/data/catalog`
+- `POST /api/backtests/data/download`
+- `POST /api/backtests/data/export`
+- `POST /api/backtests/data/import`
+- `POST /api/backtests/data/delete`
+- `POST /api/backtests/run`
+- `POST /api/backtests/page`
+- `POST /api/backtests/detail`
+- `POST /api/backtests/trades`
+
+当前历史数据与回测链路约束：
+
+- 历史数据下载不再让前端输入时间范围，统一按 `app.backtest.download_timerange` 下载到当前时点
+- 可选交易对来自 `app.backtest.supported_symbols`
+- 历史数据导入导出统一使用 zip 压缩包
+- 回测优先按历史文件发起，任务数据源会记录文件名、路径、格式、大小和文件时间范围
 
 ## 重要实现约束
 

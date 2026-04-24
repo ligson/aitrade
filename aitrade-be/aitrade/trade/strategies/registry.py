@@ -11,6 +11,7 @@ _STRATEGY_DEFINITIONS: list[dict[str, Any]] = [
         'strategyType': 'gpt',
         'displayName': 'GPT AI 策略',
         'description': '通过兼容 OpenAI 接口的模型分析行情并生成交易信号。',
+        'backtestSupported': False,
         'defaultParams': dict(DEFAULT_GPT_STRATEGY_CONFIG),
         'paramSchema': [
             {
@@ -30,6 +31,7 @@ _STRATEGY_DEFINITIONS: list[dict[str, Any]] = [
         'strategyType': 'btc_spot_breakout',
         'displayName': 'BTC 现货突破策略',
         'description': '基于 Donchian 通道、EMA 趋势、ATR 止损和成交量确认的 BTC 现货 long-only 规则策略。',
+        'backtestSupported': True,
         'defaultParams': dict(DEFAULT_BTC_SPOT_BREAKOUT_CONFIG),
         'paramSchema': [
             {'field': 'donchian_entry', 'label': '突破入场窗口', 'type': 'integer', 'required': True, 'min': 1},
@@ -63,6 +65,7 @@ def list_strategy_definitions() -> list[dict[str, Any]]:
             'defaultParams': dict(item['defaultParams']),
             'paramSchema': [dict(field) for field in item['paramSchema']],
             'schemaVersion': item['schemaVersion'],
+            'backtestSupported': item.get('backtestSupported', False),
         }
         for item in _STRATEGY_DEFINITIONS
     ]
@@ -79,4 +82,5 @@ def get_strategy_definition(strategy_type: str) -> dict[str, Any]:
         'defaultParams': dict(item['defaultParams']),
         'paramSchema': [dict(field) for field in item['paramSchema']],
         'schemaVersion': item['schemaVersion'],
+        'backtestSupported': item.get('backtestSupported', False),
     }

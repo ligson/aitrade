@@ -20,6 +20,9 @@ http.interceptors.request.use((config) => {
 
 http.interceptors.response.use(
   (response) => {
+    if (response.config.responseType === 'blob') {
+      return response
+    }
     const payload = response.data as ApiEnvelope<unknown>
     if (!payload.success) {
       message.error(payload.message || '请求失败')
@@ -44,6 +47,22 @@ http.interceptors.response.use(
 export async function post<T>(url: string, data?: unknown): Promise<T> {
   const response = await http.post<ApiEnvelope<T>>(url, data)
   return response.data.data
+}
+
+export async function postFormData<T>(url: string, formData: FormData): Promise<T> {
+  const response = await http.post<ApiEnvelope<T>>(url, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
+  return response.data.data
+}
+
+export async function postBlob(url: string, data?: unknown): Promise<Blob> {
+  const response = await http.post(url, data, {
+    responseType: 'blob',
+  })
+  return response.data as Blob
 }
 
 export async function get<T>(url: string): Promise<T> {

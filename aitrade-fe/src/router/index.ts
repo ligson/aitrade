@@ -8,6 +8,8 @@ const LoginView = () => import('@/views/login/LoginView.vue')
 const UserListView = () => import('@/views/users/UserListView.vue')
 const TradeLogView = () => import('@/views/trade-logs/TradeLogView.vue')
 const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.vue')
+const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
+const BacktestView = () => import('@/views/backtests/BacktestView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -47,6 +49,22 @@ const router = createRouter({
           component: StrategyConfigView,
           meta: {
             title: '策略配置',
+          },
+        },
+        {
+          path: 'backtest-data',
+          name: 'backtest-data',
+          component: BacktestDataView,
+          meta: {
+            title: '历史数据管理',
+          },
+        },
+        {
+          path: 'backtests',
+          name: 'backtests',
+          component: BacktestView,
+          meta: {
+            title: '策略回测',
           },
         },
       ],

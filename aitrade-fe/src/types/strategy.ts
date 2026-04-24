@@ -16,6 +16,7 @@ export interface StrategyDefinition {
   defaultParams: Record<string, unknown>
   paramSchema: StrategyFieldSchema[]
   schemaVersion: number
+  backtestSupported: boolean
 }
 
 export interface StrategyProfile {

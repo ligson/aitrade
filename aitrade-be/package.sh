@@ -42,6 +42,7 @@ tar \
     --exclude='*.pyc' \
     --exclude='*.pyo' \
     --exclude='*.log' \
+    --exclude='.DS_Store' \
     --exclude='config.yaml' \
     --exclude='.venv' \
     --exclude='venv' \

@@ -15,7 +15,7 @@ app:
     # OKX交易所需要的密码（仅在使用OKX时需要配置）
     password: your_okx_password
   http_client:
-    # 交易接口代理,不配置默认不启用
+    # 交易所访问与 freqtrade 历史数据下载共用这组代理配置，不配置默认不启用
     proxy_enable: false
     # 代理地址
     proxy_url: http://127.0.0.1:10809
@@ -58,10 +58,8 @@ app:
     persistence:
       # 是否启用交易记录持久化
       enabled: true
-      # 数据库连接地址，默认使用本地 SQLite；将来可改为 MySQL 等其他数据库 DSN
+      # 数据库连接地址，统一使用 database_url；默认使用本地 SQLite，将来可改为 MySQL 等其他数据库 DSN
       database_url: sqlite:///./.aitrade/trades.sqlite3
-      # 兼容旧配置时可继续使用 sqlite_path，但优先推荐 database_url
-      # sqlite_path: ./.aitrade/trades.sqlite3
       # 是否持久化当前持仓状态
       persist_position: true
       # 启动时是否从本地持久化快照恢复持仓
@@ -99,3 +97,25 @@ app:
         volume_multiplier: 1.1
         # 单笔风险比例
         default_risk_per_trade: 0.01
+  backtest:
+    # Freqtrade 下载的历史数据目录
+    data_dir: ./.aitrade/backtest-data
+    # Freqtrade CLI 的 user_data 目录，会由接口自动初始化
+    user_data_dir: ./.aitrade/freqtrade-user-data
+    # 历史数据管理页允许下载和导入的交易对列表
+    supported_symbols:
+      - BTC/USDT
+      - ETH/USDT
+      - SOL/USDT
+    # 默认回测交易对
+    default_symbol: BTC/USDT
+    # 默认回测周期
+    default_timeframe: 15m
+    # 历史数据下载统一按全量范围执行，默认从 2018-01-01 开始
+    download_timerange: 20180101-
+    # freqtrade 命令名，可替换为绝对路径
+    freqtrade_bin: freqtrade
+    # 历史数据默认以压缩格式落盘，减少传输和存储开销
+    data_format_ohlcv: jsongz
+    # 历史数据导入导出压缩包格式，当前仅支持 zip
+    export_archive_format: zip
