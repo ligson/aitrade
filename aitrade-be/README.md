@@ -38,6 +38,23 @@ bash stop.sh
 
 其中现有 `start.sh` / `status.sh` / `stop.sh` 主要服务 Bot 运行链路，本次仓库迁移未新增 Web 专用运维脚本。
 
+### 管理台控制交易任务
+
+当前 Web 管理台已经支持在“交易中心 / 交易任务”页直接控制交易任务：
+
+- 查看交易任务当前状态
+- 按 `config.yaml` 当前配置开始运行
+- 停止当前交易任务
+- 在运行中自动轮询状态
+- 查看最近一次到多次运行的数据库事件日志
+
+补充约束：
+
+- Web 服务启动后**不会自动运行**交易任务
+- 页面点击“开始运行”时，会重新读取 `aitrade-be/config.yaml` 作为本次运行参数
+- 修改 `config.yaml` 后，如需生效，需要在页面重新开始交易任务
+- 当前页面控制采用 Web 进程内单实例 Runner，只允许同一时刻有一个交易任务运行
+
 当前 Web API 主要服务 `aitrade-fe/` 管理台，默认本地联调地址如下：
 
 - 前端开发服务：`http://127.0.0.1:5173`
@@ -149,6 +166,7 @@ bash query-trades.sh position
 - `api/trade-logs`：交易日志分页、当前持仓
 - `api/strategies`：策略定义、策略配置列表、保存、删除
 - `api/backtests`：历史数据管理、回测任务创建、任务详情与成交明细查询
+- `api/system`：系统设置、系统日志、交易任务状态/启动/停止
 
 其中分页接口统一返回 `data.total`、`data.size`、`data.offset` 与 `data.data`。
 

@@ -1,5 +1,6 @@
 import logging
 import time
+from threading import Event
 
 from ...config import config_file
 
@@ -62,57 +63,67 @@ class TradingBot:
     def close(self) -> None:
         self.trade_executor.close()
 
-    def run(self) -> None:
+    def get_cycle_interval_seconds(self) -> int:
+        return self.config.trade_timeframe * 60
+
+    def run_cycle(self) -> None:
+        logging.info("开始新的交易周期")
+        data = self.market_data_fetcher.get_enhanced_market_data(
+            symbol=self.config.trade_symbol,
+            timeframe=str(self.config.trade_timeframe) + 'm',
+            limit=self.required_history,
+        )
+        logging.debug("获取到市场数据: %s 价格: %s", data['symbol'], data['price'])
+
+        position = self.trade_executor.get_position()
+        signal = self.strategy.generate_signal(data, position)
+        logging.info("策略信号生成完成: %s (%s)", signal['action'], signal.get('reason', '无原因'))
+
+        if position:
+            self.trade_executor.update_position_risk(
+                symbol=self.config.trade_symbol,
+                stop_loss=signal.get('stop_loss_price'),
+                trailing_stop_price=signal.get('trailing_stop_price'),
+                market_price=data['price'],
+                meta=signal.get('meta'),
+            )
+            position = self.trade_executor.get_position()
+
+        if signal['action'] != 'hold':
+            logging.info("信号满足交易条件，开始执行交易")
+            self.trade_executor.execute_trade_with_risk_management(
+                self.config.trade_symbol,
+                signal,
+                data,
+                self.risk_manager,
+                trigger_source='strategy_signal',
+            )
+        else:
+            logging.info("当前信号不建议交易")
+
+        position = self.trade_executor.get_position()
+        if position and position.get('stop_loss') is not None and data['price'] <= position['stop_loss']:
+            logging.warning("触发止损条件! 当前价格: %s, 止损价格: %s", data['price'], position['stop_loss'])
+            self._execute_stop_loss(position, data)
+
+    def run(self, stop_event: Event | None = None) -> None:
         logging.info("启动交易机器人主循环...")
+        effective_stop_event = stop_event or Event()
 
-        while True:
+        while not effective_stop_event.is_set():
             try:
-                logging.info("开始新的交易周期")
-                data = self.market_data_fetcher.get_enhanced_market_data(
-                    symbol=self.config.trade_symbol,
-                    timeframe=str(self.config.trade_timeframe) + 'm',
-                    limit=self.required_history,
-                )
-                logging.debug("获取到市场数据: %s 价格: %s", data['symbol'], data['price'])
-
-                position = self.trade_executor.get_position()
-                signal = self.strategy.generate_signal(data, position)
-                logging.info("策略信号生成完成: %s (%s)", signal['action'], signal.get('reason', '无原因'))
-
-                if position:
-                    self.trade_executor.update_position_risk(
-                        symbol=self.config.trade_symbol,
-                        stop_loss=signal.get('stop_loss_price'),
-                        trailing_stop_price=signal.get('trailing_stop_price'),
-                        market_price=data['price'],
-                        meta=signal.get('meta'),
-                    )
-                    position = self.trade_executor.get_position()
-
-                if signal['action'] != 'hold':
-                    logging.info("信号满足交易条件，开始执行交易")
-                    self.trade_executor.execute_trade_with_risk_management(
-                        self.config.trade_symbol,
-                        signal,
-                        data,
-                        self.risk_manager,
-                        trigger_source='strategy_signal',
-                    )
-                else:
-                    logging.info("当前信号不建议交易")
-
-                position = self.trade_executor.get_position()
-                if position and position.get('stop_loss') is not None and data['price'] <= position['stop_loss']:
-                    logging.warning("触发止损条件! 当前价格: %s, 止损价格: %s", data['price'], position['stop_loss'])
-                    self._execute_stop_loss(position, data)
-
-                sleep_time = self.config.trade_timeframe * 60
+                self.run_cycle()
+                sleep_time = self.get_cycle_interval_seconds()
                 logging.info("交易周期完成，等待 %s 秒后开始下一周期", sleep_time)
-                time.sleep(sleep_time)
+                if effective_stop_event.wait(sleep_time):
+                    logging.info("收到停止信号，交易机器人准备退出")
+                    break
             except Exception as e:
                 logging.exception("主循环发生错误: %s", e)
                 logging.info("等待60秒后重试...")
-                time.sleep(60)
+                if effective_stop_event.wait(60):
+                    logging.info("收到停止信号，交易机器人准备退出")
+                    break
 
     def _execute_stop_loss(self, position, market_data):
         try:

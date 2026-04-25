@@ -7,6 +7,7 @@ const BasicLayout = () => import('@/layouts/BasicLayout.vue')
 const LoginView = () => import('@/views/login/LoginView.vue')
 const UserListView = () => import('@/views/users/UserListView.vue')
 const TradeLogView = () => import('@/views/trade-logs/TradeLogView.vue')
+const TradeTaskView = () => import('@/views/trade-logs/TradeTaskView.vue')
 const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.vue')
 const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
 const BacktestView = () => import('@/views/backtests/BacktestView.vue')
@@ -54,6 +55,15 @@ const router = createRouter({
           meta: {
             title: '用户维护',
             breadcrumb: ['系统管理', '用户维护'],
+          },
+        },
+        {
+          path: 'trade-tasks',
+          name: 'trade-tasks',
+          component: TradeTaskView,
+          meta: {
+            title: '交易任务',
+            breadcrumb: ['交易中心', '交易任务'],
           },
         },
         {

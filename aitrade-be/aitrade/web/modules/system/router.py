@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi import Request
 from pydantic import BaseModel
 
 from ...api_response import page_response
@@ -8,6 +9,7 @@ from ...dependencies import get_config
 from ...dependencies import require_admin
 from ....config.config_file import Config
 from .service import SystemService
+from .trade_task_service import TradeTaskService
 
 router = APIRouter()
 
@@ -52,3 +54,30 @@ def system_log_content(
 ):
     service = SystemService(config)
     return success_response(service.read_log_content(payload.filename, payload.tailLines))
+
+
+@router.post('/trade-task/status')
+def trade_task_status(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    service: TradeTaskService = request.app.state.trade_task_service
+    return success_response(service.get_status())
+
+
+@router.post('/trade-task/start')
+def trade_task_start(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    service: TradeTaskService = request.app.state.trade_task_service
+    return success_response(service.start(current_user))
+
+
+@router.post('/trade-task/stop')
+def trade_task_stop(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    service: TradeTaskService = request.app.state.trade_task_service
+    return success_response(service.stop())

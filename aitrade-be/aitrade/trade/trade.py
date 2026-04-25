@@ -1,4 +1,5 @@
 import logging
+from threading import Event
 
 from .trading_system.trading_bot import TradingBot
 from ..config import config_file
@@ -9,9 +10,9 @@ class OptimizedCryptoBot:
         self.trading_bot = TradingBot(cfg)
         logging.info("优化版交易机器人已初始化")
 
-    def run(self):
+    def run(self, stop_event: Event | None = None):
         """运行交易机器人"""
-        self.trading_bot.run()
+        self.trading_bot.run(stop_event=stop_event)
 
     def close(self):
         self.trading_bot.close()

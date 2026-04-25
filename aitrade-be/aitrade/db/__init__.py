@@ -4,6 +4,8 @@ from .models_admin import StrategyProfileModel
 from .models_admin import UserModel
 from .models_backtest import BacktestJobModel
 from .models_backtest import BacktestTradeModel
+from .models_runtime import TradeTaskRuntimeModel
+from .models_runtime_log import TradeTaskLogModel
 from .models_trade import PositionStateModel
 from .models_trade import TradeRecordModel
 
@@ -16,4 +18,6 @@ __all__ = [
     'StrategyProfileModel',
     'BacktestJobModel',
     'BacktestTradeModel',
+    'TradeTaskRuntimeModel',
+    'TradeTaskLogModel',
 ]

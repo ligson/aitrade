@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 主运行入口是 `python -m aitrade`。程序会加载 `./config.yaml`，构建交易系统，获取市场数据，根据配置选择策略生成信号，经过风控后执行交易，再按 `trade.timeframe` 的分钟数休眠。
 
+当前 Web 管理台已支持在“交易中心 / 交易任务”页控制交易任务开始 / 停止 / 查看状态，并展示最近运行日志；Web 服务启动后默认不自动运行交易任务，页面开始任务时会重新读取当前 `./config.yaml`。
+
 ## 常用命令
 
 ### 环境准备
@@ -50,6 +52,11 @@ uv run python -m aitrade.web_runner
 其中：
 - `python -m aitrade`：启动交易机器人 Bot 主链路
 - `python -m aitrade.web_runner`：启动 Web API
+
+管理台控制补充说明：
+- `python -m aitrade.web_runner` 只启动 Web API，不会自动启动交易任务
+- 交易任务可在管理台“交易中心 / 交易任务”页通过页面开始 / 停止
+- 页面开始任务时会重新读取 `config.yaml`，因此修改配置后需重新开始任务才会生效
 
 后台运行：
 

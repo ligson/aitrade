@@ -11,6 +11,38 @@ export interface SystemSettings {
   downloadTimerange: string
 }
 
+export interface TradeTaskLogItem {
+  id: number
+  runnerName: string
+  eventType: string
+  status: string
+  message: string
+  detail: Record<string, unknown>
+  createdAt: string | null
+}
+
+export interface TradeTaskStatus {
+  runnerName: string
+  status: string
+  isRunning: boolean
+  canStart: boolean
+  canStop: boolean
+  startedAt: string | null
+  stoppedAt: string | null
+  stopRequestedAt: string | null
+  lastHeartbeatAt: string | null
+  lastCycleStartedAt: string | null
+  lastCycleFinishedAt: string | null
+  nextRunAt: string | null
+  lastError: string
+  startedBy: string
+  symbol: string
+  timeframeMinutes: number | null
+  strategyType: string
+  updatedAt: string | null
+  recentLogs: TradeTaskLogItem[]
+}
+
 export interface SystemLogFileItem {
   filename: string
   path: string

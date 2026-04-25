@@ -53,6 +53,7 @@
 <script setup lang="ts">
 import {
   CloudDownloadOutlined,
+  DashboardOutlined,
   DatabaseOutlined,
   FileTextOutlined,
   FundOutlined,
@@ -95,6 +96,7 @@ const menuGroups: MenuGroup[] = [
     title: '交易中心',
     icon: FundOutlined,
     children: [
+      { key: 'trade-tasks', title: '交易任务', icon: DashboardOutlined, routePath: '/trade-tasks' },
       { key: 'trade-logs', title: '交易日志', icon: FundOutlined, routePath: '/trade-logs' },
     ],
   },

@@ -1,5 +1,5 @@
 import { post } from './http'
-import type { SystemLogContent, SystemLogFilePage, SystemSettings } from '@/types/system'
+import type { SystemLogContent, SystemLogFilePage, SystemSettings, TradeTaskStatus } from '@/types/system'
 
 export function fetchSystemSettings() {
   return post<SystemSettings>('/api/system/settings')
@@ -19,4 +19,16 @@ export function fetchSystemLogContent(payload: {
   tailLines?: number
 }) {
   return post<SystemLogContent>('/api/system/logs/content', payload)
+}
+
+export function fetchTradeTaskStatus() {
+  return post<TradeTaskStatus>('/api/system/trade-task/status')
+}
+
+export function startTradeTask() {
+  return post<TradeTaskStatus>('/api/system/trade-task/start')
+}
+
+export function stopTradeTask() {
+  return post<TradeTaskStatus>('/api/system/trade-task/stop')
 }
