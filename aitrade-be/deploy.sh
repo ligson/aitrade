@@ -9,6 +9,8 @@ FRONTEND_API_BASE_URL="${3:-}"
 FRONTEND_DIR="$REPO_ROOT/aitrade-fe"
 FRONTEND_DIST_DIR="$FRONTEND_DIR/dist"
 DIST_DIR="$ROOT_DIR/dist"
+REMOTE_WEB_PORT="18080"
+VERIFY_ROUTE_PATH="/api/system/trade-task/logs/page"
 
 log() {
     printf '[deploy] %s\n' "$1"
@@ -79,10 +81,16 @@ ssh "$SSH_ALIAS" "set -euo pipefail; rm -rf '$REMOTE_RELEASE_DIR'; mkdir -p '$RE
 log '上传前端静态产物到共享目录'
 ssh "$SSH_ALIAS" "rm -rf '$REMOTE_SHARED_PUBLIC_TMP_DIR' && mkdir -p '$REMOTE_SHARED_PUBLIC_TMP_DIR'"
 scp -r "$FRONTEND_DIST_DIR/." "$SSH_ALIAS:$REMOTE_SHARED_PUBLIC_TMP_DIR/"
-ssh "$SSH_ALIAS" "set -euo pipefail; rm -rf '$REMOTE_SHARED_PUBLIC_DIR'; mv '$REMOTE_SHARED_PUBLIC_TMP_DIR' '$REMOTE_SHARED_PUBLIC_DIR'; ln -sfn '$REMOTE_RELEASE_DIR' '$REMOTE_CURRENT_LINK'; if command -v semanage >/dev/null 2>&1; then semanage fcontext -a -t httpd_sys_content_t '${REMOTE_SHARED_PUBLIC_DIR}(/.*)?' 2>/dev/null || semanage fcontext -m -t httpd_sys_content_t '${REMOTE_SHARED_PUBLIC_DIR}(/.*)?'; fi; restorecon -RF '$REMOTE_SHARED_PUBLIC_DIR' >/dev/null 2>&1 || true"
+ssh "$SSH_ALIAS" "set -euo pipefail; rm -rf '$REMOTE_SHARED_PUBLIC_DIR'; mv '$REMOTE_SHARED_PUBLIC_TMP_DIR' '$REMOTE_SHARED_PUBLIC_DIR'; if command -v semanage >/dev/null 2>&1; then semanage fcontext -a -t httpd_sys_content_t '${REMOTE_SHARED_PUBLIC_DIR}(/.*)?' 2>/dev/null || semanage fcontext -m -t httpd_sys_content_t '${REMOTE_SHARED_PUBLIC_DIR}(/.*)?'; fi; restorecon -RF '$REMOTE_SHARED_PUBLIC_DIR' >/dev/null 2>&1 || true"
 
-log '在远端重启 Web 服务并执行校验'
-ssh "$SSH_ALIAS" "set -euo pipefail; cd '$REMOTE_CURRENT_LINK/aitrade-be'; bash init-env.sh; bash stop-web.sh || true; bash start-web.sh; bash status-web.sh; test -f '$REMOTE_SHARED_PUBLIC_DIR/index.html'; curl -fsS 'http://127.0.0.1:18080/health' >/dev/null"
+log '在远端停止当前 Web 服务'
+ssh "$SSH_ALIAS" "set -euo pipefail; if [ -L '$REMOTE_CURRENT_LINK' ] && [ -d '$REMOTE_CURRENT_LINK/aitrade-be' ]; then cd '$REMOTE_CURRENT_LINK/aitrade-be'; bash stop-web.sh || true; else echo '[deploy] 当前未发现可停止的 current Web 目录'; fi"
+
+log '切换 current 到新版本并重启 Web 服务'
+ssh "$SSH_ALIAS" "set -euo pipefail; ln -sfn '$REMOTE_RELEASE_DIR' '$REMOTE_CURRENT_LINK'; cd '$REMOTE_CURRENT_LINK/aitrade-be'; bash init-env.sh; bash start-web.sh; bash status-web.sh; test -f '$REMOTE_SHARED_PUBLIC_DIR/index.html'"
+
+log '执行远端部署后校验'
+ssh "$SSH_ALIAS" "set -euo pipefail; CURRENT_TARGET=\$(readlink '$REMOTE_CURRENT_LINK'); if [ \"\$CURRENT_TARGET\" != '$REMOTE_RELEASE_DIR' ]; then echo '[deploy][ERROR] current 软链未指向本次版本：'\"\$CURRENT_TARGET\"; exit 1; fi; STATUS_OUTPUT=\$(cd '$REMOTE_CURRENT_LINK/aitrade-be' && bash status-web.sh); printf '%s\n' \"\$STATUS_OUTPUT\"; printf '%s\n' \"\$STATUS_OUTPUT\" | grep -q '\\[INFO\\] 当前状态: running' || { echo '[deploy][ERROR] Web 服务未处于 running 状态'; exit 1; }; RUNTIME_PID=\$(printf '%s\n' \"\$STATUS_OUTPUT\" | grep '^PID:' | head -n 1 | awk '{print \$2}'); LISTENER_PID=\$(printf '%s\n' \"\$STATUS_OUTPUT\" | grep '^监听 PID:' | head -n 1 | awk '{print \$3}'); if [ -n \"\$LISTENER_PID\" ] && [ \"\$RUNTIME_PID\" != \"\$LISTENER_PID\" ]; then echo '[deploy][ERROR] 运行态 PID 与监听 PID 不一致：runtime='\"\$RUNTIME_PID\"' listener='\"\$LISTENER_PID\"; exit 1; fi; HTTP_CODE=\$(curl -sS -o /tmp/aitrade-health.out -w '%{http_code}' 'http://127.0.0.1:$REMOTE_WEB_PORT/health'); if [ \"\$HTTP_CODE\" -lt 200 ] || [ \"\$HTTP_CODE\" -ge 300 ]; then echo '[deploy][ERROR] /health 校验失败，HTTP 状态码：'\"\$HTTP_CODE\"; cat /tmp/aitrade-health.out; exit 1; fi; curl -fsS 'http://127.0.0.1:$REMOTE_WEB_PORT/openapi.json' | python3 -c \"import json,sys; data=json.load(sys.stdin); path='$VERIFY_ROUTE_PATH'; sys.exit(0 if path in data.get('paths', {}) else 1)\" || { echo '[deploy][ERROR] openapi.json 未包含关键路由 $VERIFY_ROUTE_PATH'; exit 1; }"
 
 log '远端部署完成'
 printf 'SSH 别名: %s\n' "$SSH_ALIAS"
@@ -94,4 +102,5 @@ printf 'current 软链: %s\n' "$REMOTE_CURRENT_LINK"
 printf '\n部署后检查命令：\n'
 printf 'ssh %s "cd %s && bash status-web.sh"\n' "$SSH_ALIAS" "$REMOTE_CURRENT_LINK/aitrade-be"
 printf 'ssh %s "test -f %s/index.html && echo ok"\n' "$SSH_ALIAS" "$REMOTE_SHARED_PUBLIC_DIR"
-printf 'ssh %s "curl -fsS http://127.0.0.1:18080/health"\n' "$SSH_ALIAS"
+printf 'ssh %s "curl -fsS http://127.0.0.1:%s/health"\n' "$SSH_ALIAS" "$REMOTE_WEB_PORT"
+printf 'ssh %s "curl -fsS http://127.0.0.1:%s/openapi.json | python3 -c '\''import json,sys; data=json.load(sys.stdin); print(sorted([p for p in data.get(\"paths\", {}) if p.startswith(\"/api/system/trade-task\")]))'\''"\n' "$SSH_ALIAS" "$REMOTE_WEB_PORT"

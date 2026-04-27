@@ -27,6 +27,9 @@
 - 收口 Web 对 `config.yaml` 任务级配置的依赖：`python -m aitrade.web_runner` 与 `bash start-web.sh` 不再要求保留 `sandbox_trade / symbol / timeframe / limit / strategy.*` 等任务级 YAML 占位，真实任务参数统一以数据库配置与启动快照为准；CLI/Bot 直跑链路仍保持原有文件配置语义。
 - 为系统设置、交易任务状态机与 AI 信号链路补充关键中文注释和分级日志，重点说明 Web/Bot 配置边界、整份 editable 保存语义、API Key 掩码保留旧值规则、run snapshot 固化语义与 stale/failed 等运行状态，便于后续维护和排障。
 - 补充本地联调协作规则：默认固定复用 `127.0.0.1:5173` 前端端口与 `127.0.0.1:18081` 后端 Web 端口，启动前优先复用已运行进程，并优先遵循 `.idea/runConfigurations/fe_dev.xml` 与 `.idea/runConfigurations/be_web.xml` 的启动命令和工作目录，避免在同一会话里反复切换端口或新起多个开发进程。
+- 增强远端部署稳态：`deploy.sh` 改为先停止当前 `current` 版本的 Web 服务，再切换新 release；同时补充 `current` 软链、运行态 PID 与实际监听 PID、一条关键 OpenAPI 路由和 `/health` 的联合校验，避免出现“源码已更新但旧进程仍占端口、线上继续提供旧路由表”的情况。
+- 增强 Web 运维脚本排障能力：`start-web.sh` 新增端口监听者识别与启动后监听归属校验，`status-web.sh` 新增监听 PID/命令展示，并同步把这次旧进程占用 `18080` 导致新版本未生效的经验写入运维文档与后端 README。
+- 补充脚本协作约束：仓库内 `*.sh` 脚本默认需要兼容 macOS 与 Linux，后续新增或修改脚本时应优先使用双平台都支持的命令与参数，避免引入 GNU 专属写法。
 
 ## 2026-04-24
 

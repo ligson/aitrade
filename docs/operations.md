@@ -64,9 +64,11 @@ pnpm --dir aitrade-fe dev
 默认本地联调关系：
 
 - 前端：`http://127.0.0.1:5173`
-- 后端：`http://127.0.0.1:18080`
+- 后端：`http://127.0.0.1:18081`
 
 开发环境中前端通过 Vite 代理访问后端，因此修改 `.env.development` 或后端路由后，通常需要分别重启前端或后端进程。
+
+这里的 `18081` 仅用于**本地开发协作约定**；远端正式部署当前仍默认使用 `18080`，不要把两者混为一谈。
 
 ## 常见排障
 
@@ -124,14 +126,29 @@ bash deploy.sh chenws-japan
 部署脚本默认会自动完成：
 
 - 本地前端构建与后端打包
-- 远端上传、解压、切换 `current`
+- 远端上传、解压新 release，并准备共享 `config.yaml`
+- 先停止当前 `current` 版本的 Web 服务，再切换 `current`
 - 前端静态资源全量更新到 `/data/aitrade/shared/public`
-- 远端执行 `init-env.sh`、`stop-web.sh`、`start-web.sh`、`status-web.sh`
-- 校验共享静态目录与本机 `http://127.0.0.1:18080/health`
+- 远端执行 `init-env.sh`、`start-web.sh`、`status-web.sh`
+- 校验共享静态目录、本机 `http://127.0.0.1:18080/health`、`current` 软链目标，以及 `openapi.json` 是否包含关键路由
 
 Nginx 静态站点根目录应固定指向 `/data/aitrade/shared/public`，不要指向具体 release 目录；`/api` 再反代到后端 Web 服务。
 
 如果服务器启用了 SELinux，还需要保证 `/data/aitrade/shared/public` 使用 `httpd_sys_content_t` 上下文；当前部署脚本会自动尝试执行 `semanage fcontext` 与 `restorecon`。
+
+### 远端部署后接口仍 404 的排查顺序
+
+如果部署脚本执行完成，但线上新接口仍然 404，不要先怀疑源码没发布；优先按下面顺序检查：
+
+1. `ssh <server> "cd /data/aitrade/current/aitrade-be && bash status-web.sh"`
+2. 确认 `status-web.sh` 里的 `PID` 与 `监听 PID` 一致
+3. 确认 `readlink /data/aitrade/current` 已指向本次 release
+4. `curl http://127.0.0.1:18080/health` 确认 Web 进程存活
+5. `curl http://127.0.0.1:18080/openapi.json`，确认目标路径已经出现在路由表里
+
+本次线上事故的根因就是：**旧的 `aitrade.web_runner` 进程一直监听 `18080`，新版本虽然已经切换 `current`，但新进程启动时 bind 失败，最终线上继续对外提供旧路由表。**
+
+因此要牢记：`/health` 正常只说明“有进程在响应”，**不等于当前 release 一定已经真正接管端口**；部署后还要核对监听进程与关键路由是否来自当前版本。
 
 ## 运行态目录
 

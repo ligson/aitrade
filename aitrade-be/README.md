@@ -39,7 +39,10 @@ bash stop.sh
 - Bot：`uv run python -m aitrade`
 - Web：`uv run python -m aitrade.web_runner`
 
-其中现有 `start.sh` / `status.sh` / `stop.sh` 主要服务 Bot 运行链路，本次仓库迁移未新增 Web 专用运维脚本。
+其中：
+
+- `start.sh / status.sh / stop.sh` 主要服务 Bot 运行链路
+- `start-web.sh / status-web.sh / stop-web.sh` 负责 Web 服务的后台启动、状态查看与停止
 
 ### 管理台控制交易任务
 
@@ -66,8 +69,10 @@ bash stop.sh
 当前 Web API 主要服务 `aitrade-fe/` 管理台，默认本地联调地址如下：
 
 - 前端开发服务：`http://127.0.0.1:5173`
-- 后端 Web API：`http://127.0.0.1:18080`
+- 后端 Web API：`http://127.0.0.1:18081`
 - 健康检查：`GET /health` 或 `POST /health`
+
+这里的 `18081` 是本地联调约定；远端正式部署当前默认仍使用 `app.web.port=18080`。
 
 ### `bash init-env.sh`
 
@@ -239,9 +244,9 @@ bash deploy.sh chenws-japan
 - 解压为版本目录并准备 `/data/aitrade/shared/config.yaml`
 - 在当前版本的 `aitrade-be/` 下把 `config.yaml` 软链到共享配置
 - 上传前端静态产物到固定共享目录 `/data/aitrade/shared/public`
-- 切换 `/data/aitrade/current` 到新版本
-- 自动执行远端 `init-env.sh`、`stop-web.sh`、`start-web.sh`、`status-web.sh`
-- 自动校验 `/data/aitrade/shared/public/index.html` 与 `http://127.0.0.1:18080/health`
+- 先停止当前 `current` 版本的 Web 服务，再切换 `/data/aitrade/current` 到新版本
+- 自动执行远端 `init-env.sh`、`start-web.sh`、`status-web.sh`
+- 自动校验 `/data/aitrade/shared/public/index.html`、`http://127.0.0.1:18080/health`、`current` 软链目标，以及 `openapi.json` 中的关键路由
 
 远端正式目录约定：
 
@@ -260,7 +265,15 @@ systemctl reload nginx
 
 如果远端启用了 SELinux，需确保 `/data/aitrade/shared/public` 被标记为 `httpd_sys_content_t`；当前部署脚本会自动尝试写入 `semanage fcontext` 并执行 `restorecon`。
 
-Web 服务默认监听 `app.web.port`，默认端口为 `18080`。
+Web 服务默认监听 `app.web.port`，远端正式部署当前默认端口为 `18080`。
+
+如果部署完成后页面新接口仍然 404，不要只看 `/health`；还要继续检查：
+
+- `bash status-web.sh` 输出里的 `PID` 与 `监听 PID` 是否一致
+- `readlink /data/aitrade/current` 是否指向本次 release
+- `curl http://127.0.0.1:18080/openapi.json` 是否已经包含目标路径
+
+本次就出现过“`current` 已切到新版本，但旧 Web 进程仍占着 `18080`，导致线上继续提供旧路由表”的情况。
 
 ## 协作文档约定
 
