@@ -11,8 +11,8 @@ A simple trading system for AI.
 ## 配置
 
 1. 复制 `config.example.yaml` 为 `config.yaml`
-2. Web 场景下，`config.yaml` 只需要保留仍然由文件负责的系统级配置：GPT 密钥、交易所凭证、代理、Web 服务参数、持久化数据库连接，以及回测目录/外部命令
-3. Web 管理台中的“系统设置”页会把一部分非敏感系统参数保存到数据库，例如 `app.gpt.provider / model`、`app.trade.persistence.persist_position / restore_position_on_startup`、`app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
+2. Web 场景下，`config.yaml` 只需要保留仍然由文件负责的系统级配置：交易所凭证、代理、Web 服务参数、持久化数据库连接，以及回测目录/外部命令
+3. Web 管理台中的“系统设置”页会把一部分系统参数保存到数据库，其中 AI 设置页负责 `app.gpt.provider / model / api_key / base_url`，交易设置页负责 `app.trade.persistence.persist_position / restore_position_on_startup`，数据设置页负责 `app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
 4. 因此 `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次打开系统设置页时，会基于文件中的当前值或运行时默认值初始化数据库记录
 5. 如果你只启动 Web 管理台，`config.yaml` 不再要求保留任务级交易参数；真实交易任务参数以数据库任务配置和启动快照为准
 6. 如果你要直接运行 Bot（`uv run python -m aitrade` / `bash start.sh`），再额外补齐 `app.trade.sandbox_trade / symbol / timeframe / limit / strategy.*`
@@ -59,7 +59,7 @@ bash stop.sh
 - 页面后续修改任务配置，不会影响已经运行中的任务实例
 - Web 场景下，`config.yaml` 只要求保留系统级配置与 `app.trade.persistence`；不再要求保留任务级交易参数占位
 - Web 场景下，系统设置页保存的非敏感参数会覆盖 `config.yaml` 中对应的 `app.gpt`、`app.trade.persistence` 和 `app.backtest` 字段，并作用于后续新回测/新任务
-- 密钥、数据库连接、代理、监听地址、目录路径和外部命令等敏感或部署期配置不会进入网页配置，仍只来自 `config.yaml`
+- AI 密钥与可选 Base URL 已迁到“AI 设置”页维护；交易所凭证、数据库连接、代理、监听地址、目录路径和外部命令等部署期配置仍只来自 `config.yaml`
 - CLI/Bot 直跑场景下，仍需在 `config.yaml` 中提供 `sandbox_trade / symbol / timeframe / limit / strategy.*`
 - 当前页面控制采用 Web 进程内单实例 Runner，只允许同一时刻有一个交易任务运行
 

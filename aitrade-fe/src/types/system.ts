@@ -1,14 +1,21 @@
 import type { PageData } from './api'
 
+// 仍由部署期文件或运行环境维护、页面只读展示的系统信息。
 export interface SystemSettingsReadonly {
   backtestDataDir: string
   freqtradeUserDataDir: string
   appLogDir: string
 }
 
+// 页面保存接口要求整份 editable 一起提交，即使当前页面只编辑其中一部分字段。
 export interface SystemSettingsEditable {
   gptProvider: string
   gptModel: string
+  gptApiKey: string
+  gptBaseUrl: string
+  hasGptApiKey: boolean
+  // 读取设置时这里是掩码回显，不保证是明文 key。
+  gptApiKeyMasked: string
   persistPosition: boolean
   restorePositionOnStartup: boolean
   supportedSymbols: string[]
@@ -53,6 +60,7 @@ export interface TradeTaskLogItem {
 }
 
 export interface TradeTaskRunItem {
+  // snapshot 是启动瞬间固化下来的运行快照，用于排障和审计，不会随着 profile 更新而回写变化。
   id: number
   runnerName: string
   tradeTaskProfileId: number | null
@@ -75,6 +83,7 @@ export interface TradeTaskRunItem {
   errorMessage: string
 }
 
+// 这是当前 runner 的运行时状态视图，不等同于某一次 run 的最终历史记录。
 export interface TradeTaskStatus {
   runnerName: string
   runId: number | null

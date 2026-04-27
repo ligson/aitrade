@@ -17,6 +17,8 @@ router = APIRouter()
 class SystemSettingsEditableRequest(BaseModel):
     gptProvider: str
     gptModel: str
+    gptApiKey: str = ''
+    gptBaseUrl: str = ''
     persistPosition: bool
     restorePositionOnStartup: bool
     supportedSymbols: list[str]

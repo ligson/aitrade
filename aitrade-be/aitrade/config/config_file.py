@@ -150,6 +150,7 @@ class Config:
     def __init__(self, config_source, mode: str = 'bot'):
         if isinstance(config_source, dict):
             self.config = copy.deepcopy(config_source)
+            logging.debug('从内存对象初始化配置，mode=%s', mode)
         else:
             config_file = str(config_source)
             if os.path.exists(config_file):
@@ -166,12 +167,32 @@ class Config:
 
         app_cfg = _require_mapping(self.config.get('app'), 'app')
 
-        gpt_cfg = _require_mapping(app_cfg.get('gpt'), 'app.gpt')
+        # Bot/CLI 直跑要求文件里提供完整 AI 配置；
+        # Web 管理台模式允许这些字段先缺省，后续再由数据库系统设置补齐生效配置。
+        gpt_raw = app_cfg.get('gpt')
+        if self.mode == 'bot':
+            gpt_cfg = _require_mapping(gpt_raw, 'app.gpt')
+        elif gpt_raw is None:
+            logging.debug('Web 模式未在 config.yaml 中提供 app.gpt，后续由系统设置补齐可编辑 AI 参数')
+            gpt_cfg = {}
+        else:
+            gpt_cfg = _require_mapping(gpt_raw, 'app.gpt')
         self.gpt_provider = _require_non_empty_string(gpt_cfg.get('provider', 'deepseek'), 'app.gpt.provider')
         if self.gpt_provider not in {'deepseek', 'openai'}:
             raise ConfigValidationError("配置项 app.gpt.provider 只支持 deepseek 或 openai")
-        self.gpt_api_key = _require_non_empty_string(gpt_cfg.get('api_key'), 'app.gpt.api_key')
+        gpt_api_key = str(gpt_cfg.get('api_key') or '').strip()
+        if self.mode == 'bot':
+            self.gpt_api_key = _require_non_empty_string(gpt_api_key, 'app.gpt.api_key')
+        else:
+            self.gpt_api_key = gpt_api_key
         self.gpt_model = _require_non_empty_string(gpt_cfg.get('model', 'deepseek-chat'), 'app.gpt.model')
+        gpt_base_url = gpt_cfg.get('base_url')
+        if gpt_base_url is None:
+            self.gpt_base_url = ''
+        elif not isinstance(gpt_base_url, str):
+            raise ConfigValidationError('配置项 app.gpt.base_url 必须是字符串')
+        else:
+            self.gpt_base_url = gpt_base_url.strip()
 
         http_client_cfg = _require_mapping(app_cfg.get('http_client'), 'app.http_client')
         self.proxy_enable = _require_bool(http_client_cfg.get('proxy_enable', False), 'app.http_client.proxy_enable')
@@ -199,6 +220,8 @@ class Config:
         trade_raw = app_cfg.get('trade')
         trade_cfg = _require_mapping(trade_raw, 'app.trade') if trade_raw is not None else {}
         has_trade_task_fields = any(key in trade_cfg for key in ('sandbox_trade', 'symbol', 'timeframe', 'limit', 'strategy'))
+        # Web 场景下的任务级参数会由交易任务配置页和运行快照提供，
+        # 因此这里只在 Bot/CLI 直跑模式下强制要求文件里给出完整任务配置。
         if self.mode == 'bot' and not has_trade_task_fields:
             raise ConfigValidationError(
                 'Bot/CLI 模式要求在 app.trade 中提供任务级配置：sandbox_trade、symbol、timeframe、limit、strategy'
@@ -231,8 +254,11 @@ class Config:
 
         _require_bool(self.trade_persistence_config.get('enabled'), 'app.trade.persistence.enabled')
         database_url = persistence_overrides.get('database_url')
+        # trade.persistence 仍属于部署期配置边界，页面目前只允许覆盖持仓持久化开关；
+        # 真实数据库连接地址仍然只从 config.yaml 读取。
         # sqlite_path 仅用于兼容旧配置，新的配置文件统一使用 database_url。
         if database_url is None and persistence_overrides.get('sqlite_path') is not None:
+            logging.info('检测到旧字段 app.trade.persistence.sqlite_path，自动转换为 database_url 使用')
             sqlite_path = _require_non_empty_string(
                 persistence_overrides.get('sqlite_path'),
                 'app.trade.persistence.sqlite_path',
@@ -304,6 +330,7 @@ class Config:
             raise ConfigValidationError('配置项 app.web.init_admin.remark 必须是字符串')
         self.web_init_admin_config['remark'] = remark
 
+        # Web 页面只会覆盖回测默认参数，目录路径和外部命令仍然要求在文件里维护。
         backtest_overrides = app_cfg.get('backtest', {})
         if backtest_overrides is None:
             backtest_overrides = {}
@@ -367,3 +394,12 @@ class Config:
             _require_positive_number(btc_spot_cfg.get(key), f'app.trade.strategy.btc_spot_breakout.{key}')
         for key in ('confirm_macd', 'confirm_volume'):
             _require_bool(btc_spot_cfg.get(key), f'app.trade.strategy.btc_spot_breakout.{key}')
+
+        logging.info(
+            '配置初始化完成: mode=%s provider=%s strategy_type=%s persistence_enabled=%s custom_gpt_base_url=%s',
+            self.mode,
+            self.gpt_provider,
+            self.trade_strategy_type,
+            self.trade_persistence_config.get('enabled'),
+            bool(self.gpt_base_url),
+        )

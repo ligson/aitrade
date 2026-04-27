@@ -11,7 +11,7 @@ from .technical_analyzer import TechnicalAnalyzer
 
 
 class SignalGenerator:
-    """GPT交易信号生成器。"""
+    """串联技术分析、市场环境评估、提示词构建、模型调用与默认信号兜底。"""
 
     def __init__(
         self,
@@ -20,7 +20,8 @@ class SignalGenerator:
         proxy_url: str = None,
         model: str = "deepseek-chat",
     ):
-        logging.info("初始化GPT信号生成器")
+        # 上层策略已经把 provider 差异收敛成最终 base_url，这里只负责创建 OpenAI 兼容客户端。
+        logging.info('初始化 GPT 信号生成器: model=%s custom_base_url=%s proxy_enabled=%s', model, bool(base_url), bool(proxy_url))
         logging.debug("API基础URL: %s", base_url)
         logging.debug("模型名称: %s", model)
 
@@ -40,6 +41,7 @@ class SignalGenerator:
         logging.info("GPT信号生成器初始化完成")
 
     def _format_error_message(self, error: Exception) -> str:
+        # 统一把底层 SDK、网络和代理错误收敛为更适合运维排查的中文信息。
         raw_message = str(error)
         normalized = raw_message.lower()
 
@@ -54,6 +56,7 @@ class SignalGenerator:
     def get_ai_signal(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
         logging.info("开始获取AI交易信号")
         try:
+            # 先在本地完成技术分析与市场环境摘要，尽量减少直接交给模型的原始数据噪音。
             logging.info("执行技术分析")
             tech_analysis = TechnicalAnalyzer.perform_technical_analysis(market_data)
             logging.debug(
@@ -74,6 +77,7 @@ class SignalGenerator:
             response = self._call_ai_model(prompt)
             logging.debug("AI模型调用完成")
 
+            # 即便模型返回了文本，也必须先经过解析与结构校验，不能直接把自然语言结果交给执行层。
             logging.info("解析AI模型响应")
             signal = ResponseParser.parse_response(response)
             logging.debug("响应解析完成，建议操作: %s", signal.get('action', 'N/A'))
@@ -88,13 +92,14 @@ class SignalGenerator:
             logging.info("AI交易信号获取完成: %s (置信度: %.2f)", signal['action'], signal['confidence'])
             return signal
         except Exception as e:
+            # AI 链路失败时返回默认信号而不是继续抛异常，避免单次模型故障直接中断整轮交易循环。
             logging.debug("AI 原始异常: %s", e)
             logging.error("获取AI交易信号时发生错误: %s", self._format_error_message(e))
             logging.info("使用默认信号")
             return self._get_default_signal()
 
     def _call_ai_model(self, prompt: str) -> str:
-        logging.debug("开始调用AI模型")
+        logging.debug('开始调用AI模型: model=%s prompt_length=%s', self.model, len(prompt))
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -116,10 +121,11 @@ class SignalGenerator:
         )
 
         result = response.choices[0].message.content
-        logging.debug("AI模型调用完成")
+        logging.debug('AI模型调用完成: response_length=%s', len(result or ''))
         return result
 
     def _get_default_signal(self) -> Dict[str, Any]:
+        # 默认信号是降级保护，用来显式阻止在数据不足或 AI 调用失败时继续贸然交易。
         logging.info("生成默认信号")
         default_signal = {
             "action": "hold",

@@ -14,6 +14,9 @@ const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.v
 const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
 const BacktestView = () => import('@/views/backtests/BacktestView.vue')
 const SystemSettingsView = () => import('@/views/system/SystemSettingsView.vue')
+const SystemAISettingsView = () => import('@/views/system/SystemAISettingsView.vue')
+const SystemTradeSettingsView = () => import('@/views/system/SystemTradeSettingsView.vue')
+const SystemDataSettingsView = () => import('@/views/system/SystemDataSettingsView.vue')
 const SystemLogView = () => import('@/views/system/SystemLogView.vue')
 
 const router = createRouter({
@@ -37,8 +40,35 @@ const router = createRouter({
           name: 'system-settings',
           component: SystemSettingsView,
           meta: {
-            title: '系统设置',
-            breadcrumb: ['系统管理', '系统设置'],
+            title: '系统概览',
+            breadcrumb: ['系统管理', '系统概览'],
+          },
+        },
+        {
+          path: 'system-ai-settings',
+          name: 'system-ai-settings',
+          component: SystemAISettingsView,
+          meta: {
+            title: 'AI 设置',
+            breadcrumb: ['系统管理', 'AI 设置'],
+          },
+        },
+        {
+          path: 'system-trade-settings',
+          name: 'system-trade-settings',
+          component: SystemTradeSettingsView,
+          meta: {
+            title: '交易设置',
+            breadcrumb: ['系统管理', '交易设置'],
+          },
+        },
+        {
+          path: 'system-data-settings',
+          name: 'system-data-settings',
+          component: SystemDataSettingsView,
+          meta: {
+            title: '数据设置',
+            breadcrumb: ['系统管理', '数据设置'],
           },
         },
         {

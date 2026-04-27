@@ -1,8 +1,4 @@
 app:
-  gpt:
-    # gpt接口密钥
-    api_key: sk-xxxxxxxxxxxxxxx
-
   exchange:
     # 交易接口类型, 可选值: binance, okx
     type: binance

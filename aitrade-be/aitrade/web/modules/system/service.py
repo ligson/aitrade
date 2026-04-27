@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,13 +19,16 @@ from ...exceptions import ValidationError
 
 SYSTEM_SETTING_SCHEMA_VERSION = 1
 SYSTEM_SETTING_PROFILE_NAME = '默认系统设置'
-SYSTEM_SETTING_PROFILE_DESCRIPTION = '由 Web 管理台维护的非敏感系统配置'
+SYSTEM_SETTING_PROFILE_DESCRIPTION = '由 Web 管理台维护的系统配置'
 SUPPORTED_GPT_PROVIDERS = {'deepseek', 'openai'}
 SUPPORTED_BACKTEST_DATA_FORMATS = {'json', 'jsongz'}
 SUPPORTED_BACKTEST_ARCHIVE_FORMATS = {'zip'}
+GPT_API_KEY_MASK_PLACEHOLDER = '********'
 
 
 class SystemService:
+    """维护 Web 场景下的系统设置默认档案、归一化与生效配置构建。"""
+
     def __init__(self, config: Config):
         self.config = config
         self.database_url = config.trade_persistence_config['database_url']
@@ -35,7 +39,10 @@ class SystemService:
         Base.metadata.create_all(self.engine)
 
     def get_settings(self) -> dict[str, Any]:
+        # readonly 仅展示仍由部署期文件维护的路径类信息；
+        # editable 才是允许页面保存并持久化到数据库的可编辑字段。
         effective_config, profile = self.get_effective_config()
+        logging.debug('读取系统设置成功: profile_id=%s schema_version=%s', profile.id, profile.schema_version)
         backtest_config = effective_config.backtest_config
         base_backtest_config = self.config.backtest_config
         backtest_data_dir = Path(base_backtest_config['data_dir']).expanduser().resolve()
@@ -57,11 +64,23 @@ class SystemService:
         }
 
     def save_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # 前端虽然拆成多个设置子页，但保存接口语义仍然是整份 editable 覆盖保存，
+        # 因此前端提交时必须带上其他页面当前值，不能只传本页字段。
         editable = payload.get('editable')
         if not isinstance(editable, dict):
             raise ValidationError('系统设置内容不能为空')
-        normalized = self._normalize_editable_settings(editable)
         _, profile = self._ensure_default_profile()
+        current_params = self._normalize_params_json(profile.params_json)
+        normalized = self._normalize_editable_settings(editable, current_params)
+        logging.info(
+            '保存系统设置: profile_id=%s provider=%s has_api_key=%s persist_position=%s supported_symbols=%s supported_timeframes=%s',
+            profile.id,
+            normalized['gpt']['provider'],
+            bool(normalized['gpt']['api_key']),
+            normalized['trade']['persistence']['persist_position'],
+            len(normalized['backtest']['supported_symbols']),
+            len(normalized['backtest']['supported_timeframes']),
+        )
         now = self._now_iso()
         with self.Session() as session:
             model = session.get(SystemSettingProfileModel, profile.id)
@@ -77,6 +96,7 @@ class SystemService:
             model.schema_version = SYSTEM_SETTING_SCHEMA_VERSION
             model.updated_at = now
             session.commit()
+        logging.debug('系统设置保存完成: profile_id=%s 覆盖域=%s', profile.id, ['gpt', 'trade.persistence', 'backtest'])
         return self.get_settings()
 
     def get_effective_config(self) -> tuple[Config, SystemSettingProfileModel]:
@@ -85,6 +105,7 @@ class SystemService:
         try:
             return Config.from_dict(config_data, mode='web'), profile
         except ConfigValidationError as exc:
+            logging.error('构建系统设置生效配置失败: profile_id=%s error=%s', profile.id, exc)
             raise ValidationError(str(exc)) from exc
 
     def build_effective_config_dict(self, override_params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -93,12 +114,17 @@ class SystemService:
         config_data = copy.deepcopy(self.config.config)
         app_cfg = dict(config_data.get('app') or {})
 
+        # 系统设置只对白名单字段做覆盖，避免把数据库里无关字段整段合并回 app。
         gpt_cfg = dict(app_cfg.get('gpt') or {})
         gpt_override = dict(override_params.get('gpt') or {})
         if 'provider' in gpt_override:
             gpt_cfg['provider'] = gpt_override['provider']
         if 'model' in gpt_override:
             gpt_cfg['model'] = gpt_override['model']
+        if 'api_key' in gpt_override:
+            gpt_cfg['api_key'] = gpt_override['api_key']
+        if 'base_url' in gpt_override:
+            gpt_cfg['base_url'] = gpt_override['base_url']
         app_cfg['gpt'] = gpt_cfg
 
         trade_cfg = dict(app_cfg.get('trade') or {})
@@ -128,6 +154,7 @@ class SystemService:
         app_cfg['backtest'] = backtest_cfg
 
         config_data['app'] = app_cfg
+        logging.debug('构建系统设置生效配置完成: 覆盖域=%s', ['gpt', 'trade.persistence', 'backtest'])
         return config_data
 
     def list_log_files(self, offset: int, size: int, keyword: str = '', log_type: str = '') -> tuple[int, list[dict[str, Any]]]:
@@ -161,6 +188,8 @@ class SystemService:
         }
 
     def _ensure_default_profile(self) -> tuple[dict[str, Any], SystemSettingProfileModel]:
+        # 系统设置始终保证存在一个启用中的默认档案；
+        # 旧档案会在读取时归一化到当前 schema，避免历史字段缺失影响生效配置构建。
         with self.Session() as session:
             profile = (
                 session.query(SystemSettingProfileModel)
@@ -172,6 +201,7 @@ class SystemService:
                 profile = session.query(SystemSettingProfileModel).order_by(SystemSettingProfileModel.id.asc()).first()
             if profile is None:
                 now = self._now_iso()
+                logging.info('未找到系统设置档案，自动创建默认档案')
                 profile = SystemSettingProfileModel(
                     name=SYSTEM_SETTING_PROFILE_NAME,
                     description=SYSTEM_SETTING_PROFILE_DESCRIPTION,
@@ -186,15 +216,18 @@ class SystemService:
                 session.refresh(profile)
             else:
                 if not profile.enabled:
+                    logging.warning('检测到默认系统设置档案被停用，自动重新启用: profile_id=%s', profile.id)
                     profile.enabled = True
                     session.commit()
                     session.refresh(profile)
             params = self._normalize_params_json(profile.params_json)
-            normalized = self._normalize_editable_settings(self._serialize_editable_payload(params))
+            normalized = self._normalize_editable_settings(self._serialize_editable_payload(params), params)
             normalized_json = json.dumps(normalized, ensure_ascii=False)
             if profile.params_json != normalized_json or profile.schema_version != SYSTEM_SETTING_SCHEMA_VERSION:
+                logging.warning('系统设置档案内容或 schema 已过期，自动归一化修正: profile_id=%s', profile.id)
                 profile.params_json = normalized_json
                 profile.schema_version = SYSTEM_SETTING_SCHEMA_VERSION
+                profile.updated_at = self._now_iso()
                 session.commit()
                 session.refresh(profile)
             return normalized, profile
@@ -204,6 +237,8 @@ class SystemService:
             {
                 'gptProvider': self.config.gpt_provider,
                 'gptModel': self.config.gpt_model,
+                'gptApiKey': self.config.gpt_api_key,
+                'gptBaseUrl': self.config.gpt_base_url,
                 'persistPosition': self.config.trade_persistence_config['persist_position'],
                 'restorePositionOnStartup': self.config.trade_persistence_config['restore_position_on_startup'],
                 'supportedSymbols': list(self.config.backtest_config['supported_symbols']),
@@ -220,6 +255,10 @@ class SystemService:
         return {
             'gptProvider': config.gpt_provider,
             'gptModel': config.gpt_model,
+            'gptApiKey': self._mask_secret(config.gpt_api_key),
+            'gptBaseUrl': config.gpt_base_url,
+            'hasGptApiKey': bool(config.gpt_api_key),
+            'gptApiKeyMasked': self._mask_secret(config.gpt_api_key),
             'persistPosition': bool(config.trade_persistence_config['persist_position']),
             'restorePositionOnStartup': bool(config.trade_persistence_config['restore_position_on_startup']),
             'supportedSymbols': list(config.backtest_config['supported_symbols']),
@@ -236,9 +275,14 @@ class SystemService:
         trade_params = dict(params.get('trade') or {})
         persistence_params = dict(trade_params.get('persistence') or {})
         backtest_params = dict(params.get('backtest') or {})
+        api_key = str(gpt_params.get('api_key', self.config.gpt_api_key) or '')
         return {
             'gptProvider': gpt_params.get('provider', self.config.gpt_provider),
             'gptModel': gpt_params.get('model', self.config.gpt_model),
+            'gptApiKey': self._mask_secret(api_key),
+            'gptBaseUrl': str(gpt_params.get('base_url', self.config.gpt_base_url) or ''),
+            'hasGptApiKey': bool(api_key),
+            'gptApiKeyMasked': self._mask_secret(api_key),
             'persistPosition': persistence_params.get('persist_position', self.config.trade_persistence_config['persist_position']),
             'restorePositionOnStartup': persistence_params.get(
                 'restore_position_on_startup',
@@ -253,13 +297,25 @@ class SystemService:
             'exportArchiveFormat': backtest_params.get('export_archive_format', self.config.backtest_config['export_archive_format']),
         }
 
-    def _normalize_editable_settings(self, editable: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_editable_settings(self, editable: dict[str, Any], current_params: dict[str, Any] | None = None) -> dict[str, Any]:
+        # 这里把前端 editable payload 归一化为数据库持久化结构。
+        # 其中 gptApiKey 的空值、统一占位符或当前掩码值都表示“保留旧密钥”，而不是清空。
         provider = str(editable.get('gptProvider') or '').strip()
         if provider not in SUPPORTED_GPT_PROVIDERS:
             raise ValidationError('GPT 提供方仅支持 deepseek 或 openai')
         model = str(editable.get('gptModel') or '').strip()
         if not model:
             raise ValidationError('GPT 模型名称不能为空')
+        current_gpt_params = dict((current_params or {}).get('gpt') or {})
+        existing_api_key = str(current_gpt_params.get('api_key', self.config.gpt_api_key) or '').strip()
+        raw_api_key = str(editable.get('gptApiKey') or '').strip()
+        masked_existing_api_key = self._mask_secret(existing_api_key)
+        if raw_api_key in {'', GPT_API_KEY_MASK_PLACEHOLDER, masked_existing_api_key}:
+            logging.warning('系统设置保存未替换 GPT API Key，继续保留已存在密钥')
+            gpt_api_key = existing_api_key
+        else:
+            gpt_api_key = raw_api_key
+        gpt_base_url = str(editable.get('gptBaseUrl') or '').strip()
         persist_position = editable.get('persistPosition')
         if not isinstance(persist_position, bool):
             raise ValidationError('是否持久化当前持仓必须是布尔值')
@@ -291,6 +347,8 @@ class SystemService:
             'gpt': {
                 'provider': provider,
                 'model': model,
+                'api_key': gpt_api_key,
+                'base_url': gpt_base_url,
             },
             'trade': {
                 'persistence': {
@@ -328,6 +386,16 @@ class SystemService:
         return normalized
 
     @staticmethod
+    def _mask_secret(value: str) -> str:
+        # 仅用于页面回显“已配置密钥”的状态，不承担加密或安全存储职责。
+        secret = str(value or '').strip()
+        if not secret:
+            return ''
+        if len(secret) <= 8:
+            return GPT_API_KEY_MASK_PLACEHOLDER
+        return f'{secret[:3]}****{secret[-4:]}'
+
+    @staticmethod
     def _normalize_params_json(value: str) -> dict[str, Any]:
         try:
             payload = json.loads(value or '{}')
@@ -353,10 +421,12 @@ class SystemService:
             raise ValidationError('日志文件名不能为空')
         path = (self.log_dir / normalized).resolve()
         if path.parent != self.log_dir:
+            logging.warning('拒绝访问越界日志文件路径: %s', normalized)
             raise ValidationError('日志文件路径非法')
         if not path.exists() or not path.is_file():
             raise ValidationError(f'未找到日志文件：{normalized}')
         if path.suffix.lower() != '.log':
+            logging.warning('拒绝读取非 .log 文件: %s', normalized)
             raise ValidationError('当前仅支持查看 .log 日志文件')
         return path
 

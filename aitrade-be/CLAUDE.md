@@ -60,6 +60,8 @@ uv run python -m aitrade.web_runner
 - 页面开始任务时会先生成数据库快照；之后再改页面配置，不会影响当前已运行任务
 - Web 场景下，`config.yaml` 仅继续承载系统级配置与 `app.trade.persistence`；任务级参数以数据库配置为准
 - CLI/Bot 直跑场景下，仍需在 `config.yaml` 中提供 `sandbox_trade / symbol / timeframe / limit / strategy.*`
+- 本地联调默认优先复用已运行的 `be-web` / `fe-dev` 进程；Web API 默认复用 `config.yaml` 中的监听端口（当前常用 `127.0.0.1:18081`），前端默认复用 `127.0.0.1:5173`，非用户明确要求不要为了验证随意改端口或额外起进程
+- 如果需要按 IDE 约定启动，优先使用仓库内 `.idea/runConfigurations/be_web.xml` 与 `.idea/runConfigurations/fe_dev.xml` 定义的命令和工作目录
 
 后台运行：
 
@@ -98,7 +100,6 @@ bash query-trades.sh position
 运行时配置通过 `aitrade/config/config_file.py` 从 `config.yaml` 加载。
 
 Web 场景下，`config.yaml` 需要保留的顶层结构包括：
-- `app.gpt`：至少保留 `api_key`
 - `app.exchange`：交易所类型、凭证，以及可选的 OKX 密码
 - `app.http_client`：代理开关与代理地址
 - `app.trade.persistence`：至少保留 `database_url`
@@ -106,10 +107,10 @@ Web 场景下，`config.yaml` 需要保留的顶层结构包括：
 - `app.backtest`：至少保留 `data_dir / user_data_dir / freqtrade_bin`
 
 补充说明：
-- Web 管理台“系统设置”页会把一部分非敏感系统参数保存到数据库，并在 Web 场景下覆盖 `config.yaml` 中对应字段
-- 当前允许网页维护的主要是 `app.gpt.provider / model`、`app.trade.persistence.persist_position / restore_position_on_startup`、`app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
+- Web 管理台“系统设置”页会把一部分系统参数保存到数据库，并在 Web 场景下覆盖 `config.yaml` 中对应字段
+- 当前允许网页维护的主要是 `app.gpt.provider / model / api_key / base_url`、`app.trade.persistence.persist_position / restore_position_on_startup`、`app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
 - `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次创建系统设置记录时，会基于文件中的当前值或运行时默认值补齐
-- `app.gpt.api_key`、`app.exchange.*`、`app.web.jwt_secret`、`app.trade.persistence.database_url`、`app.http_client.*`、`app.web.host/port/debug/show_trace/cors_allow_origins`、`app.backtest.data_dir/user_data_dir/freqtrade_bin` 等敏感或部署期配置仍只来自 `config.yaml`
+- `app.exchange.*`、`app.web.jwt_secret`、`app.trade.persistence.database_url`、`app.http_client.*`、`app.web.host/port/debug/show_trace/cors_allow_origins`、`app.backtest.data_dir/user_data_dir/freqtrade_bin` 等敏感或部署期配置仍只来自 `config.yaml`
 
 仅在 Bot/CLI 直跑场景下，才额外要求：
 - `app.trade.sandbox_trade`

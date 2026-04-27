@@ -124,13 +124,18 @@ const menuGroups: MenuGroup[] = [
     title: '系统管理',
     icon: TeamOutlined,
     children: [
-      { key: 'system-settings', title: '系统设置', icon: SettingOutlined, routePath: '/system-settings', adminOnly: true },
+      // 系统设置已拆成概览、AI、交易、数据和日志多个入口，这里需要与路由和概览页导航保持一致。
+      { key: 'system-settings', title: '系统概览', icon: SettingOutlined, routePath: '/system-settings', adminOnly: true },
+      { key: 'system-ai-settings', title: 'AI 设置', icon: SettingOutlined, routePath: '/system-ai-settings', adminOnly: true },
+      { key: 'system-trade-settings', title: '交易设置', icon: SettingOutlined, routePath: '/system-trade-settings', adminOnly: true },
+      { key: 'system-data-settings', title: '数据设置', icon: DatabaseOutlined, routePath: '/system-data-settings', adminOnly: true },
       { key: 'system-logs', title: '系统日志', icon: FileTextOutlined, routePath: '/system-logs', adminOnly: true },
       { key: 'users', title: '用户维护', icon: TeamOutlined, routePath: '/users', adminOnly: true },
     ],
   },
 ]
 
+// adminOnly 只控制菜单展示层，真正的接口权限仍以后端校验为准。
 const visibleMenuGroups = computed(() =>
   menuGroups
     .map((group) => ({

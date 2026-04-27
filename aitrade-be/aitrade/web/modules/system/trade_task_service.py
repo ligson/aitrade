@@ -39,12 +39,15 @@ STATUS_STOP_REQUESTED = 'stop_requested'
 STATUS_FAILED = 'failed'
 STATUS_CONFIG_ERROR = 'config_error'
 STATUS_STALE = 'stale'
+# starting/running/stop_requested 表示当前 runner 仍应被视为活跃态；
+# stale 表示数据库残留了活跃状态，但当前 Web 进程里已经没有对应线程。
 ACTIVE_STATUSES = {STATUS_STARTING, STATUS_RUNNING, STATUS_STOP_REQUESTED}
 DEFAULT_RUNNER_NAME = 'default'
 DEFAULT_LOG_LIMIT = 20
 
 
 class TradeTaskService:
+    """维护交易任务配置档案、运行快照、运行时状态和事件日志。"""
     _instances: dict[str, 'TradeTaskService'] = {}
     _instances_lock = Lock()
 
@@ -67,9 +70,11 @@ class TradeTaskService:
         with cls._instances_lock:
             instance = cls._instances.get(database_url)
             if instance is None:
+                logging.info('创建新的交易任务服务实例')
                 instance = cls(config)
                 cls._instances[database_url] = instance
             else:
+                logging.debug('复用已有交易任务服务实例')
                 instance.config = config
             return instance
 
@@ -113,6 +118,7 @@ class TradeTaskService:
                 raise ValidationError('所选策略配置已停用')
 
             if profile_id is None:
+                logging.info('创建交易任务配置: name=%s symbol=%s timeframe=%s strategy_profile_id=%s', name, symbol, timeframe, strategy_profile_id)
                 model = TradeTaskProfileModel(
                     name=name,
                     description=description,
@@ -131,6 +137,7 @@ class TradeTaskService:
                 session.commit()
                 session.refresh(model)
             else:
+                logging.info('更新交易任务配置: id=%s name=%s symbol=%s timeframe=%s strategy_profile_id=%s', profile_id, name, symbol, timeframe, strategy_profile_id)
                 model = session.get(TradeTaskProfileModel, int(profile_id))
                 if model is None:
                     raise NotFoundError('交易任务配置不存在')
@@ -156,7 +163,9 @@ class TradeTaskService:
                 raise NotFoundError('交易任务配置不存在')
             runtime = session.get(TradeTaskRuntimeModel, model.runner_name)
             if runtime is not None and runtime.trade_task_profile_id == model.id and runtime.status in ACTIVE_STATUSES:
+                logging.warning('拒绝删除运行中的交易任务配置: profile_id=%s runtime_status=%s', profile_id, runtime.status)
                 raise ValidationError('当前交易任务正在使用该配置，不能删除')
+            logging.info('删除交易任务配置: profile_id=%s name=%s', model.id, model.name)
             session.delete(model)
             session.commit()
         return {'deleted': True, 'id': profile_id}
@@ -235,17 +244,29 @@ class TradeTaskService:
             return total, self._serialize_logs(session, models)
 
     def start(self, trade_task_profile_id: int, current_user: dict[str, Any]) -> dict[str, Any]:
+        # 启动前先固化 run snapshot，再把 runtime 切到 starting，最后才真正起线程；
+        # 这样即便后续页面继续修改配置，也不会回溯影响本次已经启动的任务。
         with self._lock:
             model = self._get_or_create_runtime()
             if self._is_thread_active():
+                logging.warning('交易任务已在运行，忽略重复启动请求: run_id=%s status=%s', model.run_id, model.status)
                 return self._wrap_status_payload(self._serialize_runtime(model))
             if model.status in ACTIVE_STATUSES:
+                logging.warning('检测到活跃状态残留，启动前先标记 stale: run_id=%s status=%s', model.run_id, model.status)
                 self._mark_stale_runtime(model)
                 model = self._get_or_create_runtime()
 
             run = self._create_run_snapshot(trade_task_profile_id, current_user)
             now = self._now_iso()
             started_by = run['createdBy']
+            logging.info(
+                '开始启动交易任务: run_id=%s profile=%s symbol=%s timeframe=%s strategy_type=%s',
+                run['id'],
+                run['profileName'],
+                run['symbol'],
+                run['timeframe'],
+                run['strategyType'],
+            )
             model.run_id = run['id']
             model.trade_task_profile_id = run['tradeTaskProfileId']
             model.profile_name = run['profileName']
@@ -284,6 +305,7 @@ class TradeTaskService:
             return self._wrap_status_payload(self._serialize_runtime(model))
 
     def stop(self) -> dict[str, Any]:
+        # stop_requested 只是通知循环在合适的边界退出，真正 stopped 需要等待运行线程收尾完成。
         with self._lock:
             model = self._get_or_create_runtime()
             if model.status not in ACTIVE_STATUSES or not self._is_thread_active():
@@ -300,6 +322,7 @@ class TradeTaskService:
                 return self._wrap_status_payload(self._serialize_runtime(model))
 
             now = self._now_iso()
+            logging.info('收到停止交易任务请求: run_id=%s status=%s', model.run_id, model.status)
             model.status = STATUS_STOP_REQUESTED
             model.stop_requested_at = now
             model.next_run_at = None
@@ -320,6 +343,8 @@ class TradeTaskService:
             return self._wrap_status_payload(self._serialize_runtime(model))
 
     def _create_run_snapshot(self, trade_task_profile_id: int, current_user: dict[str, Any]) -> dict[str, Any]:
+        # run snapshot 会在启动前固化 profile、策略参数和任务级输入，
+        # 后续 profile 或系统设置再变更时，当前 run 仍按启动瞬间的快照继续执行。
         with self.Session() as session:
             profile = session.get(TradeTaskProfileModel, trade_task_profile_id)
             if profile is None:
@@ -373,15 +398,25 @@ class TradeTaskService:
             session.add(run)
             session.commit()
             session.refresh(run)
+            logging.info(
+                '交易任务运行快照创建完成: run_id=%s profile=%s symbol=%s timeframe=%s strategy_type=%s',
+                run.id,
+                run.profile_name,
+                run.symbol,
+                run.timeframe,
+                run.strategy_type,
+            )
             return self._serialize_run(run)
 
     def _run_loop(self, run_id: int, started_by: str) -> None:
         bot = None
         try:
+            # 先把系统级生效配置与任务快照拼成当前运行时配置，再创建真实 bot 实例。
             runtime_config, run_payload = self._build_runtime_config(run_id)
             bot = OptimizedCryptoBot(runtime_config)
             now = self._now_iso()
             timeframe_minutes = self._timeframe_to_minutes(run_payload['timeframe'])
+            logging.info('交易任务运行线程已启动: run_id=%s timeframe_minutes=%s', run_id, timeframe_minutes)
             with self._lock:
                 model = self._get_or_create_runtime()
                 model.run_id = run_id
@@ -419,6 +454,7 @@ class TradeTaskService:
                 )
 
             while not self._stop_event.is_set():
+                # 每轮开始前先刷新 heartbeat 和周期开始时间，便于页面和日志观察当前活跃度。
                 cycle_started_at = self._now_iso()
                 with self._lock:
                     model = self._get_or_create_runtime()
@@ -443,6 +479,7 @@ class TradeTaskService:
 
                 bot.trading_bot.run_cycle()
 
+                # 周期结束后写回下一次计划执行时间；如果已经收到停止请求，则保留 stop_requested 状态等待退出。
                 cycle_finished_at = self._now_iso()
                 interval_seconds = bot.trading_bot.get_cycle_interval_seconds()
                 with self._lock:
@@ -469,6 +506,7 @@ class TradeTaskService:
                     break
 
             stopped_at = self._now_iso()
+            logging.info('交易任务运行线程准备结束: run_id=%s', run_id)
             with self._lock:
                 model = self._get_or_create_runtime()
                 model.status = STATUS_STOPPED
@@ -488,6 +526,7 @@ class TradeTaskService:
                     },
                 )
         except ConfigValidationError as exc:
+            logging.error('交易任务运行配置校验失败: run_id=%s error=%s', run_id, exc)
             self._mark_failed(STATUS_CONFIG_ERROR, str(exc), run_id)
         except Exception as exc:
             logging.exception('交易任务运行失败: %s', exc)
@@ -500,6 +539,8 @@ class TradeTaskService:
                 self._stop_event = Event()
 
     def _build_runtime_config(self, run_id: int) -> tuple[Config, dict[str, Any]]:
+        # 运行中的 bot 使用的是“系统级生效配置 + 本次 run snapshot”的组合结果；
+        # 因此系统设置会影响未来新任务，但不会改写已经启动任务的任务级参数。
         with self.Session() as session:
             run = session.get(TradeTaskRunModel, run_id)
             if run is None:
@@ -519,6 +560,14 @@ class TradeTaskService:
         trade_cfg['strategy'] = strategy_cfg
         app_cfg['trade'] = trade_cfg
         config_data['app'] = app_cfg
+        logging.debug(
+            '构建交易任务运行配置: run_id=%s strategy_type=%s symbol=%s timeframe=%s strategy_param_keys=%s',
+            run_id,
+            run_payload['strategyType'],
+            run_payload['symbol'],
+            run_payload['timeframe'],
+            list(strategy_params.keys()),
+        )
         return Config.from_dict(config_data), run_payload
 
     def _wrap_status_payload(self, runtime: dict[str, Any]) -> dict[str, Any]:
@@ -556,6 +605,7 @@ class TradeTaskService:
     def _mark_failed(self, status: str, error_message: str, run_id: int | None) -> None:
         now = self._now_iso()
         with self._lock:
+            logging.error('标记交易任务失败: run_id=%s status=%s error=%s', run_id, status, error_message)
             model = self._get_or_create_runtime()
             model.status = status
             model.stopped_at = now
@@ -584,7 +634,9 @@ class TradeTaskService:
                 self._mark_stale_runtime(model)
 
     def _mark_stale_runtime(self, model: TradeTaskRuntimeModel) -> dict[str, Any]:
+        # stale 表示数据库里还残留活跃状态，但当前 Web 进程内已没有对应运行线程。
         now = self._now_iso()
+        logging.warning('标记交易任务为 stale: run_id=%s previous_status=%s', model.run_id, model.status)
         model.status = STATUS_STALE
         model.stopped_at = now
         model.next_run_at = None
@@ -802,6 +854,7 @@ class TradeTaskService:
         }
 
     def _ensure_trade_task_runtime_schema(self) -> None:
+        # 这里做的是轻量历史兼容补列，避免旧库缺少运行时字段时直接阻断 Web 管理台启动。
         inspector = inspect(self.engine)
         if 'trade_task_runtime' in inspector.get_table_names():
             columns = {column['name'] for column in inspector.get_columns('trade_task_runtime')}
@@ -826,6 +879,7 @@ class TradeTaskService:
             }
             missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
             if missing_columns:
+                logging.info('检测到 trade_task_runtime 缺少历史字段，自动补列: columns=%s', list(missing_columns.keys()))
                 with self.engine.begin() as connection:
                     for name, ddl in missing_columns.items():
                         connection.execute(text(f'ALTER TABLE trade_task_runtime ADD COLUMN {name} {ddl}'))
@@ -838,11 +892,13 @@ class TradeTaskService:
             }
             missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
             if missing_columns:
+                logging.info('检测到 trade_task_logs 缺少历史字段，自动补列: columns=%s', list(missing_columns.keys()))
                 with self.engine.begin() as connection:
                     for name, ddl in missing_columns.items():
                         connection.execute(text(f'ALTER TABLE trade_task_logs ADD COLUMN {name} {ddl}'))
 
     def _normalize_timeframe(self, timeframe: str) -> str:
+        # 页面侧通常使用 5m/15m/1h 等字符串周期；这里先按系统支持列表校验，再决定是否接受数字分钟写法。
         effective_config, _ = self.system_service.get_effective_config()
         supported_timeframes = [str(item).strip() for item in effective_config.backtest_config.get('supported_timeframes') or []]
         if timeframe in supported_timeframes:
@@ -855,6 +911,7 @@ class TradeTaskService:
 
     @staticmethod
     def _timeframe_to_minutes(timeframe: str) -> int:
+        # Config 运行时仍使用整数分钟数，因此需要把页面和持久化里的字符串周期统一转换。
         normalized = str(timeframe or '').strip().lower()
         if normalized.endswith('m') and normalized[:-1].isdigit():
             return int(normalized[:-1])
