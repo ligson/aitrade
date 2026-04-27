@@ -1,6 +1,7 @@
 from .base import Base
 from .models_admin import CaptchaSessionModel
 from .models_admin import StrategyProfileModel
+from .models_admin import SystemSettingProfileModel
 from .models_admin import UserModel
 from .models_backtest import BacktestJobModel
 from .models_backtest import BacktestTradeModel
@@ -18,6 +19,7 @@ __all__ = [
     'UserModel',
     'CaptchaSessionModel',
     'StrategyProfileModel',
+    'SystemSettingProfileModel',
     'BacktestJobModel',
     'BacktestTradeModel',
     'TradeTaskProfileModel',

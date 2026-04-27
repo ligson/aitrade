@@ -20,6 +20,7 @@ from ....trade.backtest.data_service import BacktestDataService
 from ....trade.backtest.engine import BacktestStoppedError
 from ...exceptions import NotFoundError
 from ...exceptions import ValidationError
+from ..system.service import SystemService
 
 STATUS_PENDING = 'pending'
 STATUS_RUNNING = 'running'
@@ -39,7 +40,12 @@ class BacktestService:
         self.database_url = config.trade_persistence_config['database_url']
         self.engine = get_engine(self.database_url)
         self.Session = get_session_factory(self.database_url)
-        backtest_runtime_config = dict(config.backtest_config)
+        self.system_service = SystemService(config)
+        self.effective_config, _ = self.system_service.get_effective_config()
+        backtest_runtime_config = dict(self.effective_config.backtest_config)
+        backtest_runtime_config['data_dir'] = config.backtest_config['data_dir']
+        backtest_runtime_config['user_data_dir'] = config.backtest_config['user_data_dir']
+        backtest_runtime_config['freqtrade_bin'] = config.backtest_config['freqtrade_bin']
         backtest_runtime_config['proxy_enable'] = config.proxy_enable
         backtest_runtime_config['proxy_url'] = config.proxy_url
         self.data_service = BacktestDataService(backtest_runtime_config)
@@ -51,10 +57,10 @@ class BacktestService:
 
     def get_data_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
-        pair = str(payload.get('symbol') or self.config.backtest_config['default_symbol']).strip()
-        timeframe = str(payload.get('timeframe') or self.config.backtest_config['default_timeframe']).strip()
-        data_dir = self.data_service.ensure_data_dir(self.config.backtest_config)
-        status = self.data_service.get_data_status(pair=pair, timeframe=timeframe, timerange=self.config.backtest_config['download_timerange'])
+        pair = str(payload.get('symbol') or self.effective_config.backtest_config['default_symbol']).strip()
+        timeframe = str(payload.get('timeframe') or self.effective_config.backtest_config['default_timeframe']).strip()
+        data_dir = self.data_service.ensure_data_dir(self.effective_config.backtest_config)
+        status = self.data_service.get_data_status(pair=pair, timeframe=timeframe, timerange=self.effective_config.backtest_config['download_timerange'])
         status['dataDir'] = data_dir
         status['userDataDir'] = str(self.data_service.freqtrade.user_data_dir)
         return status
@@ -66,11 +72,11 @@ class BacktestService:
 
     def download_data(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
-        pair = str(payload.get('symbol') or self.config.backtest_config['default_symbol']).strip()
-        timeframe = str(payload.get('timeframe') or self.config.backtest_config['default_timeframe']).strip()
-        self.data_service.ensure_data_dir(self.config.backtest_config)
+        pair = str(payload.get('symbol') or self.effective_config.backtest_config['default_symbol']).strip()
+        timeframe = str(payload.get('timeframe') or self.effective_config.backtest_config['default_timeframe']).strip()
+        self.data_service.ensure_data_dir(self.effective_config.backtest_config)
         try:
-            return self.data_service.download_data(pair=pair, timeframe=timeframe, timerange=self.config.backtest_config['download_timerange'])
+            return self.data_service.download_data(pair=pair, timeframe=timeframe, timerange=self.effective_config.backtest_config['download_timerange'])
         except RuntimeError as exc:
             raise ValidationError(str(exc)) from exc
 
@@ -121,10 +127,10 @@ class BacktestService:
         else:
             timerange, timerange_from, timerange_to = self.data_service.extract_timerange(
                 payload,
-                fallback=self.config.backtest_config['download_timerange'],
+                fallback=self.effective_config.backtest_config['download_timerange'],
             )
-            symbol = str(payload.get('symbol') or self.config.backtest_config['default_symbol']).strip()
-            timeframe = str(payload.get('timeframe') or self.config.backtest_config['default_timeframe']).strip()
+            symbol = str(payload.get('symbol') or self.effective_config.backtest_config['default_symbol']).strip()
+            timeframe = str(payload.get('timeframe') or self.effective_config.backtest_config['default_timeframe']).strip()
             data_source = {
                 'sourceType': 'legacy',
                 'symbol': symbol,

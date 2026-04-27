@@ -57,3 +57,19 @@ class StrategyProfileModel(Base):
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class SystemSettingProfileModel(Base):
+    __tablename__ = 'system_setting_profiles'
+    __table_args__ = (
+        Index('idx_system_setting_profiles_enabled', 'enabled'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default='')
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)

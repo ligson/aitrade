@@ -30,6 +30,7 @@ from ....trade.trade import OptimizedCryptoBot
 from ...exceptions import NotFoundError
 from ...exceptions import ValidationError
 from ..strategies.params import normalize_strategy_params
+from .service import SystemService
 
 STATUS_STOPPED = 'stopped'
 STATUS_STARTING = 'starting'
@@ -52,6 +53,7 @@ class TradeTaskService:
         self.database_url = config.trade_persistence_config['database_url']
         self.engine = get_engine(self.database_url)
         self.Session = get_session_factory(self.database_url)
+        self.system_service = SystemService(config)
         self._lock = Lock()
         self._thread: Thread | None = None
         self._stop_event = Event()
@@ -503,7 +505,7 @@ class TradeTaskService:
             if run is None:
                 raise NotFoundError('交易任务运行快照不存在')
             run_payload = self._serialize_run(run)
-        config_data = copy.deepcopy(self.config.config)
+        config_data = self.system_service.build_effective_config_dict()
         app_cfg = dict(config_data.get('app') or {})
         trade_cfg = dict(app_cfg.get('trade') or {})
         strategy_cfg = dict(trade_cfg.get('strategy') or {})
@@ -841,7 +843,8 @@ class TradeTaskService:
                         connection.execute(text(f'ALTER TABLE trade_task_logs ADD COLUMN {name} {ddl}'))
 
     def _normalize_timeframe(self, timeframe: str) -> str:
-        supported_timeframes = [str(item).strip() for item in self.config.backtest_config.get('supported_timeframes') or []]
+        effective_config, _ = self.system_service.get_effective_config()
+        supported_timeframes = [str(item).strip() for item in effective_config.backtest_config.get('supported_timeframes') or []]
         if timeframe in supported_timeframes:
             return timeframe
         if timeframe.isdigit() and int(timeframe) > 0:

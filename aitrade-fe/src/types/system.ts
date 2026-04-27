@@ -1,14 +1,43 @@
 import type { PageData } from './api'
 
-export interface SystemSettings {
+export interface SystemSettingsReadonly {
   backtestDataDir: string
   freqtradeUserDataDir: string
   appLogDir: string
+}
+
+export interface SystemSettingsEditable {
+  gptProvider: string
+  gptModel: string
+  persistPosition: boolean
+  restorePositionOnStartup: boolean
+  supportedSymbols: string[]
   supportedTimeframes: string[]
+  defaultSymbol: string
   defaultTimeframe: string
+  downloadTimerange: string
   dataFormatOhlcv: string
   exportArchiveFormat: string
-  downloadTimerange: string
+}
+
+export interface SystemSettingsMeta {
+  id: number
+  name: string
+  description: string
+  schemaVersion: number
+  updatedAt: string
+}
+
+export interface SystemSettings {
+  readonly: SystemSettingsReadonly
+  editable: SystemSettingsEditable
+  meta: SystemSettingsMeta
+}
+
+export interface SystemSettingsSavePayload {
+  editable: SystemSettingsEditable
+  name?: string
+  description?: string
 }
 
 export interface TradeTaskLogItem {

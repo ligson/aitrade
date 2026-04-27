@@ -3,6 +3,7 @@ import type {
   SystemLogContent,
   SystemLogFilePage,
   SystemSettings,
+  SystemSettingsSavePayload,
   TradeTaskLogPage,
   TradeTaskLogQuery,
   TradeTaskProfile,
@@ -13,6 +14,10 @@ import type {
 
 export function fetchSystemSettings() {
   return post<SystemSettings>('/api/system/settings')
+}
+
+export function saveSystemSettings(payload: SystemSettingsSavePayload) {
+  return post<SystemSettings>('/api/system/settings/save', payload)
 }
 
 export function pageSystemLogFiles(payload: {

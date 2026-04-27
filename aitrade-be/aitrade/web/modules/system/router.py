@@ -14,6 +14,26 @@ from .trade_task_service import TradeTaskService
 router = APIRouter()
 
 
+class SystemSettingsEditableRequest(BaseModel):
+    gptProvider: str
+    gptModel: str
+    persistPosition: bool
+    restorePositionOnStartup: bool
+    supportedSymbols: list[str]
+    supportedTimeframes: list[str]
+    defaultSymbol: str
+    defaultTimeframe: str
+    downloadTimerange: str
+    dataFormatOhlcv: str
+    exportArchiveFormat: str
+
+
+class SystemSettingsSaveRequest(BaseModel):
+    editable: SystemSettingsEditableRequest
+    name: str | None = None
+    description: str | None = None
+
+
 class SystemLogFilesRequest(BaseModel):
     offset: int = 0
     size: int = 20
@@ -66,6 +86,16 @@ def system_settings(
 ):
     service = SystemService(config)
     return success_response(service.get_settings())
+
+
+@router.post('/settings/save')
+def system_settings_save(
+    payload: SystemSettingsSaveRequest,
+    config: Config = Depends(get_config),
+    _: dict = Depends(require_admin),
+):
+    service = SystemService(config)
+    return success_response(service.save_settings(payload.model_dump()))
 
 
 @router.post('/logs/files')

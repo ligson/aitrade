@@ -97,13 +97,19 @@ bash query-trades.sh position
 
 运行时配置通过 `aitrade/config/config_file.py` 从 `config.yaml` 加载。
 
-必需的顶层结构包括：
-- `app.gpt`：模型提供方、API Key、模型名
+Web 场景下，`config.yaml` 需要保留的顶层结构包括：
+- `app.gpt`：至少保留 `api_key`
 - `app.exchange`：交易所类型、凭证，以及可选的 OKX 密码
 - `app.http_client`：代理开关与代理地址
-- `app.trade.persistence`：交易记录与持仓快照持久化配置
+- `app.trade.persistence`：至少保留 `database_url`
 - `app.web`：Web 服务配置
-- `app.backtest`：历史数据与回测配置
+- `app.backtest`：至少保留 `data_dir / user_data_dir / freqtrade_bin`
+
+补充说明：
+- Web 管理台“系统设置”页会把一部分非敏感系统参数保存到数据库，并在 Web 场景下覆盖 `config.yaml` 中对应字段
+- 当前允许网页维护的主要是 `app.gpt.provider / model`、`app.trade.persistence.persist_position / restore_position_on_startup`、`app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
+- `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次创建系统设置记录时，会基于文件中的当前值或运行时默认值补齐
+- `app.gpt.api_key`、`app.exchange.*`、`app.web.jwt_secret`、`app.trade.persistence.database_url`、`app.http_client.*`、`app.web.host/port/debug/show_trace/cors_allow_origins`、`app.backtest.data_dir/user_data_dir/freqtrade_bin` 等敏感或部署期配置仍只来自 `config.yaml`
 
 仅在 Bot/CLI 直跑场景下，才额外要求：
 - `app.trade.sandbox_trade`
@@ -128,7 +134,7 @@ app:
       type: btc_spot_breakout
 ```
 
-新环境初始化时，以 `config.example.yaml` 作为配置结构的权威示例。
+新环境初始化时，以精简后的 `config.example.yaml` 作为 Web 场景配置结构的权威示例；如需直跑 Bot，再按文档补齐任务级字段。
 
 额外的持久化约定：
 - 默认通过 SQLAlchemy 同步 ORM 把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`

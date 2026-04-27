@@ -16,6 +16,7 @@ from .modules.auth.router import router as auth_router
 from .modules.backtests.router import router as backtests_router
 from .modules.strategies.router import router as strategies_router
 from .modules.system.router import router as system_router
+from .modules.system.service import SystemService
 from .modules.system.trade_task_service import TradeTaskService
 from .modules.trade_logs.router import router as trade_logs_router
 from .modules.users.router import router as users_router
@@ -27,6 +28,7 @@ def create_app(config: Config) -> FastAPI:
 
     app = FastAPI(title='aitrade-web', debug=config.web_debug)
     app.state.app_config = config
+    app.state.system_service = SystemService(config)
     app.state.trade_task_service = TradeTaskService.from_config(config)
     app.add_middleware(
         CORSMiddleware,

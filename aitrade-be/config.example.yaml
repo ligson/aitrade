@@ -1,11 +1,8 @@
 app:
   gpt:
-    # gpt接口类型, 可选值: deepseek, openai
-    provider: deepseek
     # gpt接口密钥
     api_key: sk-xxxxxxxxxxxxxxx
-    # 模型名称, 默认 deepseek-chat
-    model: deepseek-chat
+
   exchange:
     # 交易接口类型, 可选值: binance, okx
     type: binance
@@ -14,11 +11,13 @@ app:
     api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     # OKX交易所需要的密码（仅在使用OKX时需要配置）
     password: your_okx_password
+
   http_client:
     # 交易所访问与 freqtrade 历史数据下载共用这组代理配置，不配置默认不启用
     proxy_enable: false
     # 代理地址
     proxy_url: http://127.0.0.1:10809
+
   web:
     # FastAPI 服务监听地址
     host: 127.0.0.1
@@ -46,85 +45,17 @@ app:
       email: admin@example.com
       nickname: 管理员
       remark: 系统初始化管理员
+
   trade:
-    # Web 管理台场景下，这里只需要保留 persistence；真实交易任务参数以数据库配置和启动快照为准
-    # 如果使用 `uv run python -m aitrade` 或 `bash start.sh` 直接运行 Bot，请再补齐下面这些任务级字段：
-    # sandbox_trade: true
-    # symbol: BTC/USDT
-    # timeframe: 15
-    # limit: 100
-    # strategy:
-    #   type: gpt
+    # Web 管理台场景下，这里只需要保留 persistence
     persistence:
-      # 是否启用交易记录持久化
-      enabled: true
       # 数据库连接地址，统一使用 database_url；默认使用本地 SQLite，将来可改为 MySQL 等其他数据库 DSN
       database_url: sqlite:///./.aitrade/trades.sqlite3
-      # 是否持久化当前持仓状态
-      persist_position: true
-      # 启动时是否从本地持久化快照恢复持仓
-      restore_position_on_startup: false
-    # 下面这组 strategy 示例仅在 Bot/CLI 直跑场景使用；Web 管理台启动交易任务时不会读取这里
-    # strategy:
-    #   # 可选值: gpt, btc_spot_breakout
-    #   type: gpt
-    #   gpt:
-    #     # GPT策略最低置信度阈值
-    #     min_confidence: 0.7
-    #   btc_spot_breakout:
-    #     # Donchian突破入场窗口
-    #     donchian_entry: 20
-    #     # Donchian跌破出场窗口
-    #     donchian_exit: 10
-    #     # 趋势过滤EMA周期，15分钟下 96 约等于1天
-    #     ema_period: 96
-    #     # EMA斜率回看根数
-    #     ema_slope_lookback: 4
-    #     # ATR周期
-    #     atr_period: 14
-    #     # 初始止损ATR倍数
-    #     atr_stop_mult: 2.5
-    #     # 追踪止损ATR倍数
-    #     atr_trail_mult: 3.0
-    #     # 突破缓冲，单位 bps
-    #     breakout_buffer_bps: 10
-    #     # 是否要求MACD柱线大于0
-    #     confirm_macd: true
-    #     # 是否要求成交量放大
-    #     confirm_volume: true
-    #     # 成交量均线周期
-    #     volume_ma_period: 20
-    #     # 成交量放大倍数
-    #     volume_multiplier: 1.1
-    #     # 单笔风险比例
-    #     default_risk_per_trade: 0.01
+
   backtest:
     # Freqtrade 下载的历史数据目录
     data_dir: ./.aitrade/backtest-data
     # Freqtrade CLI 的 user_data 目录，会由接口自动初始化
     user_data_dir: ./.aitrade/freqtrade-user-data
-    # 历史数据管理页允许下载和导入的交易对列表
-    supported_symbols:
-      - BTC/USDT
-      - ETH/USDT
-      - SOL/USDT
-    # 默认支持下载的历史数据周期
-    supported_timeframes:
-      - 5m
-      - 15m
-      - 30m
-      - 1h
-      - 4h
-      - 1d
-    # 默认回测交易对
-    default_symbol: BTC/USDT
-    # 默认回测周期
-    default_timeframe: 15m
-    # 历史数据下载统一按全量范围执行，默认从 2018-01-01 开始
-    download_timerange: 20180101-
     # freqtrade 命令名，可替换为绝对路径
     freqtrade_bin: freqtrade
-    # 历史数据默认以压缩格式落盘，减少传输和存储开销
-    data_format_ohlcv: jsongz
-    # 历史数据导入导出压缩包格式，当前仅支持 zip
-    export_archive_format: zip

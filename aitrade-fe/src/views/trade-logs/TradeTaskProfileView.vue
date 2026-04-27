@@ -230,7 +230,7 @@ async function loadStrategyProfiles() {
 
 async function loadSettings() {
   const data = await fetchSystemSettings()
-  supportedTimeframes.value = data.supportedTimeframes
+  supportedTimeframes.value = data.editable.supportedTimeframes
   if (!form.timeframe) {
     form.timeframe = supportedTimeframes.value[0] || '15m'
   }

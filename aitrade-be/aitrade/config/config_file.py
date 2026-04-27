@@ -167,7 +167,7 @@ class Config:
         app_cfg = _require_mapping(self.config.get('app'), 'app')
 
         gpt_cfg = _require_mapping(app_cfg.get('gpt'), 'app.gpt')
-        self.gpt_provider = _require_non_empty_string(gpt_cfg.get('provider'), 'app.gpt.provider')
+        self.gpt_provider = _require_non_empty_string(gpt_cfg.get('provider', 'deepseek'), 'app.gpt.provider')
         if self.gpt_provider not in {'deepseek', 'openai'}:
             raise ConfigValidationError("配置项 app.gpt.provider 只支持 deepseek 或 openai")
         self.gpt_api_key = _require_non_empty_string(gpt_cfg.get('api_key'), 'app.gpt.api_key')
