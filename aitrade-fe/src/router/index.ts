@@ -7,7 +7,9 @@ const BasicLayout = () => import('@/layouts/BasicLayout.vue')
 const LoginView = () => import('@/views/login/LoginView.vue')
 const UserListView = () => import('@/views/users/UserListView.vue')
 const TradeLogView = () => import('@/views/trade-logs/TradeLogView.vue')
-const TradeTaskView = () => import('@/views/trade-logs/TradeTaskView.vue')
+const TradeTaskProfileView = () => import('@/views/trade-logs/TradeTaskProfileView.vue')
+const TradeTaskControlView = () => import('@/views/trade-logs/TradeTaskControlView.vue')
+const TradeTaskLogView = () => import('@/views/trade-logs/TradeTaskLogView.vue')
 const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.vue')
 const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
 const BacktestView = () => import('@/views/backtests/BacktestView.vue')
@@ -59,11 +61,33 @@ const router = createRouter({
         },
         {
           path: 'trade-tasks',
-          name: 'trade-tasks',
-          component: TradeTaskView,
+          redirect: '/trade-task-profiles',
+        },
+        {
+          path: 'trade-task-profiles',
+          name: 'trade-task-profiles',
+          component: TradeTaskProfileView,
           meta: {
-            title: '交易任务',
-            breadcrumb: ['交易中心', '交易任务'],
+            title: '交易任务配置',
+            breadcrumb: ['交易中心', '交易任务配置'],
+          },
+        },
+        {
+          path: 'trade-task-control',
+          name: 'trade-task-control',
+          component: TradeTaskControlView,
+          meta: {
+            title: '交易任务控制',
+            breadcrumb: ['交易中心', '交易任务控制'],
+          },
+        },
+        {
+          path: 'trade-task-logs',
+          name: 'trade-task-logs',
+          component: TradeTaskLogView,
+          meta: {
+            title: '任务日志',
+            breadcrumb: ['交易中心', '任务日志'],
           },
         },
         {

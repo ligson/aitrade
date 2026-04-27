@@ -139,7 +139,7 @@ validate_config() {
 from aitrade.config.config_file import Config, ConfigValidationError
 
 try:
-    Config("./config.yaml")
+    Config("./config.yaml", mode='bot')
 except ConfigValidationError as exc:
     print(f"CONFIG_ERROR::{exc}")
     raise SystemExit(1)

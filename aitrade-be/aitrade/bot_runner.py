@@ -10,7 +10,7 @@ def main() -> int:
     bot = None
     try:
         log_config.config_log()
-        cfg = config_file.Config('./config.yaml')
+        cfg = config_file.Config('./config.yaml', mode='bot')
         bot = OptimizedCryptoBot(cfg)
         bot.run()
         return 0

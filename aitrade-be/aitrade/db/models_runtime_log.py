@@ -13,9 +13,11 @@ class TradeTaskLogModel(Base):
     __table_args__ = (
         Index('idx_trade_task_logs_runner_created_at', 'runner_name', 'created_at'),
         Index('idx_trade_task_logs_event_created_at', 'event_type', 'created_at'),
+        Index('idx_trade_task_logs_run_created_at', 'run_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int | None] = mapped_column(Integer)
     runner_name: Mapped[str] = mapped_column(String, nullable=False)
     event_type: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)

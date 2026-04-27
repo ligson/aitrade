@@ -11,12 +11,13 @@ A simple trading system for AI.
 ## 配置
 
 1. 复制 `config.example.yaml` 为 `config.yaml`
-2. 根据文件注释填写 GPT、交易所、代理和交易参数
-3. 默认配置里包含沙盒模式开关，联调时优先确认该项
-4. `app.trade.strategy.type` 可切换交易策略：
+2. 先填写系统级配置：GPT、交易所、代理、Web、持久化与回测相关配置
+3. 如果你只启动 Web 管理台，`config.yaml` 不再要求保留任务级交易参数；真实交易任务参数以数据库任务配置和启动快照为准
+4. 如果你要直接运行 Bot（`uv run python -m aitrade` / `bash start.sh`），再额外补齐 `app.trade.sandbox_trade / symbol / timeframe / limit / strategy.*`
+5. `app.trade.strategy.type` 仅在 Bot/CLI 直跑场景下用于切换交易策略：
    - `gpt`：保留原有 AI 信号策略
    - `btc_spot_breakout`：BTC 现货 long-only 规则策略
-5. 默认会把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`
+6. 默认会把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`
 
 ## 初始化与运行
 
@@ -40,19 +41,22 @@ bash stop.sh
 
 ### 管理台控制交易任务
 
-当前 Web 管理台已经支持在“交易中心 / 交易任务”页直接控制交易任务：
+当前 Web 管理台已经支持在“交易中心”下分别控制和查看交易任务：
 
-- 查看交易任务当前状态
-- 按 `config.yaml` 当前配置开始运行
-- 停止当前交易任务
-- 在运行中自动轮询状态
-- 查看最近一次到多次运行的数据库事件日志
+- `交易任务配置` 页维护多套交易任务配置
+- 在 `交易任务控制` 页选择一套启用中的任务配置开始运行，并查看当前状态
+- 开始运行时先生成数据库快照，再按快照驱动本次任务
+- 在 `交易任务控制` 页停止当前交易任务
+- 在 `交易任务控制` 页运行中自动轮询状态
+- 在 `任务日志` 页查看最近一次到多次运行的数据库事件日志
 
 补充约束：
 
 - Web 服务启动后**不会自动运行**交易任务
-- 页面点击“开始运行”时，会重新读取 `aitrade-be/config.yaml` 作为本次运行参数
-- 修改 `config.yaml` 后，如需生效，需要在页面重新开始交易任务
+- 页面开始任务时，任务级参数以数据库配置与启动快照为准
+- 页面后续修改任务配置，不会影响已经运行中的任务实例
+- Web 场景下，`config.yaml` 只要求保留系统级配置与 `app.trade.persistence`；不再要求保留任务级交易参数占位
+- CLI/Bot 直跑场景下，仍需在 `config.yaml` 中提供 `sandbox_trade / symbol / timeframe / limit / strategy.*`
 - 当前页面控制采用 Web 进程内单实例 Runner，只允许同一时刻有一个交易任务运行
 
 当前 Web API 主要服务 `aitrade-fe/` 管理台，默认本地联调地址如下：
@@ -166,7 +170,7 @@ bash query-trades.sh position
 - `api/trade-logs`：交易日志分页、当前持仓
 - `api/strategies`：策略定义、策略配置列表、保存、删除
 - `api/backtests`：历史数据管理、回测任务创建、任务详情与成交明细查询
-- `api/system`：系统设置、系统日志、交易任务状态/启动/停止
+- `api/system`：系统设置、系统日志、交易任务状态/启动/停止、任务日志分页查询
 
 其中分页接口统一返回 `data.total`、`data.size`、`data.offset` 与 `data.data`。
 

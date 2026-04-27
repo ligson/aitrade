@@ -10,9 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 当前文件所在目录 `aitrade-be/` 是后端项目根目录。
 
-主运行入口是 `python -m aitrade`。程序会加载 `./config.yaml`，构建交易系统，获取市场数据，根据配置选择策略生成信号，经过风控后执行交易，再按 `trade.timeframe` 的分钟数休眠。
+主运行入口是 `python -m aitrade`。在 Bot/CLI 直跑场景下，程序会加载 `./config.yaml`，构建交易系统，获取市场数据，根据配置选择策略生成信号，经过风控后执行交易，再按 `trade.timeframe` 的分钟数休眠。
 
-当前 Web 管理台已支持在“交易中心 / 交易任务”页控制交易任务开始 / 停止 / 查看状态，并展示最近运行日志；Web 服务启动后默认不自动运行交易任务，页面开始任务时会重新读取当前 `./config.yaml`。
+当前 Web 管理台已支持在“交易中心 / 交易任务”页维护多套交易任务配置，并基于所选配置开始 / 停止 / 查看状态；任务启动时会把任务级参数固化为数据库快照，并在独立“交易中心 / 任务日志”页查询运行事件日志；Web 服务启动后默认不自动运行交易任务。
 
 ## 常用命令
 
@@ -55,8 +55,11 @@ uv run python -m aitrade.web_runner
 
 管理台控制补充说明：
 - `python -m aitrade.web_runner` 只启动 Web API，不会自动启动交易任务
-- 交易任务可在管理台“交易中心 / 交易任务”页通过页面开始 / 停止
-- 页面开始任务时会重新读取 `config.yaml`，因此修改配置后需重新开始任务才会生效
+- 交易任务可在管理台“交易中心 / 交易任务”页通过页面配置开始 / 停止
+- 交易任务运行事件日志可在管理台“交易中心 / 任务日志”页查询
+- 页面开始任务时会先生成数据库快照；之后再改页面配置，不会影响当前已运行任务
+- Web 场景下，`config.yaml` 仅继续承载系统级配置与 `app.trade.persistence`；任务级参数以数据库配置为准
+- CLI/Bot 直跑场景下，仍需在 `config.yaml` 中提供 `sandbox_trade / symbol / timeframe / limit / strategy.*`
 
 后台运行：
 
@@ -98,10 +101,18 @@ bash query-trades.sh position
 - `app.gpt`：模型提供方、API Key、模型名
 - `app.exchange`：交易所类型、凭证，以及可选的 OKX 密码
 - `app.http_client`：代理开关与代理地址
-- `app.trade`：沙盒模式、交易对、时间周期、K 线数量，以及持久化配置
-- `app.trade.strategy`：策略类型与各策略参数
+- `app.trade.persistence`：交易记录与持仓快照持久化配置
+- `app.web`：Web 服务配置
+- `app.backtest`：历史数据与回测配置
 
-配置切换示例：
+仅在 Bot/CLI 直跑场景下，才额外要求：
+- `app.trade.sandbox_trade`
+- `app.trade.symbol`
+- `app.trade.timeframe`
+- `app.trade.limit`
+- `app.trade.strategy.*`
+
+Bot/CLI 配置切换示例：
 
 ```yaml
 app:

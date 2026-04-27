@@ -126,7 +126,7 @@ validate_config() {
 from aitrade.config.config_file import Config, ConfigValidationError
 
 try:
-    cfg = Config('./config.yaml')
+    cfg = Config('./config.yaml', mode='web')
     print(f"CONFIG_OK::{cfg.web_host}::{cfg.web_port}")
 except ConfigValidationError as exc:
     print(f"CONFIG_ERROR::{exc}")

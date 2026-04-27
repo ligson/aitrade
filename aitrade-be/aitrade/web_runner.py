@@ -11,7 +11,7 @@ from .web import create_app
 def main() -> int:
     try:
         log_config.config_log()
-        cfg = config_file.Config('./config.yaml')
+        cfg = config_file.Config('./config.yaml', mode='web')
         app = create_app(cfg)
         uvicorn.run(app, host=cfg.web_host, port=cfg.web_port, log_level='info')
         return 0

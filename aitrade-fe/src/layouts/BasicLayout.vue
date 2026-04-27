@@ -96,7 +96,9 @@ const menuGroups: MenuGroup[] = [
     title: '交易中心',
     icon: FundOutlined,
     children: [
-      { key: 'trade-tasks', title: '交易任务', icon: DashboardOutlined, routePath: '/trade-tasks' },
+      { key: 'trade-task-profiles', title: '交易任务配置', icon: SettingOutlined, routePath: '/trade-task-profiles' },
+      { key: 'trade-task-control', title: '交易任务控制', icon: DashboardOutlined, routePath: '/trade-task-control' },
+      { key: 'trade-task-logs', title: '任务日志', icon: FileTextOutlined, routePath: '/trade-task-logs' },
       { key: 'trade-logs', title: '交易日志', icon: FundOutlined, routePath: '/trade-logs' },
     ],
   },

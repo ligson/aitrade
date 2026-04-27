@@ -47,14 +47,14 @@ app:
       nickname: 管理员
       remark: 系统初始化管理员
   trade:
-    # 是否沙盒模式, 默认True
-    sandbox_trade: true
-    # 交易对,默认BTC/USDT
-    symbol: BTC/USDT
-    # 交易时间间隔,默认15分钟
-    timeframe: 15
-    # 交易数据个数,默认100
-    limit: 100
+    # Web 管理台场景下，这里只需要保留 persistence；真实交易任务参数以数据库配置和启动快照为准
+    # 如果使用 `uv run python -m aitrade` 或 `bash start.sh` 直接运行 Bot，请再补齐下面这些任务级字段：
+    # sandbox_trade: true
+    # symbol: BTC/USDT
+    # timeframe: 15
+    # limit: 100
+    # strategy:
+    #   type: gpt
     persistence:
       # 是否启用交易记录持久化
       enabled: true
@@ -64,39 +64,40 @@ app:
       persist_position: true
       # 启动时是否从本地持久化快照恢复持仓
       restore_position_on_startup: false
-    strategy:
-      # 可选值: gpt, btc_spot_breakout
-      type: gpt
-      gpt:
-        # GPT策略最低置信度阈值
-        min_confidence: 0.7
-      btc_spot_breakout:
-        # Donchian突破入场窗口
-        donchian_entry: 20
-        # Donchian跌破出场窗口
-        donchian_exit: 10
-        # 趋势过滤EMA周期，15分钟下 96 约等于1天
-        ema_period: 96
-        # EMA斜率回看根数
-        ema_slope_lookback: 4
-        # ATR周期
-        atr_period: 14
-        # 初始止损ATR倍数
-        atr_stop_mult: 2.5
-        # 追踪止损ATR倍数
-        atr_trail_mult: 3.0
-        # 突破缓冲，单位 bps
-        breakout_buffer_bps: 10
-        # 是否要求MACD柱线大于0
-        confirm_macd: true
-        # 是否要求成交量放大
-        confirm_volume: true
-        # 成交量均线周期
-        volume_ma_period: 20
-        # 成交量放大倍数
-        volume_multiplier: 1.1
-        # 单笔风险比例
-        default_risk_per_trade: 0.01
+    # 下面这组 strategy 示例仅在 Bot/CLI 直跑场景使用；Web 管理台启动交易任务时不会读取这里
+    # strategy:
+    #   # 可选值: gpt, btc_spot_breakout
+    #   type: gpt
+    #   gpt:
+    #     # GPT策略最低置信度阈值
+    #     min_confidence: 0.7
+    #   btc_spot_breakout:
+    #     # Donchian突破入场窗口
+    #     donchian_entry: 20
+    #     # Donchian跌破出场窗口
+    #     donchian_exit: 10
+    #     # 趋势过滤EMA周期，15分钟下 96 约等于1天
+    #     ema_period: 96
+    #     # EMA斜率回看根数
+    #     ema_slope_lookback: 4
+    #     # ATR周期
+    #     atr_period: 14
+    #     # 初始止损ATR倍数
+    #     atr_stop_mult: 2.5
+    #     # 追踪止损ATR倍数
+    #     atr_trail_mult: 3.0
+    #     # 突破缓冲，单位 bps
+    #     breakout_buffer_bps: 10
+    #     # 是否要求MACD柱线大于0
+    #     confirm_macd: true
+    #     # 是否要求成交量放大
+    #     confirm_volume: true
+    #     # 成交量均线周期
+    #     volume_ma_period: 20
+    #     # 成交量放大倍数
+    #     volume_multiplier: 1.1
+    #     # 单笔风险比例
+    #     default_risk_per_trade: 0.01
   backtest:
     # Freqtrade 下载的历史数据目录
     data_dir: ./.aitrade/backtest-data

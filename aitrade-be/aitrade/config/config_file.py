@@ -139,13 +139,28 @@ def _require_string_list(value, path):
 
 
 class Config:
-    def __init__(self, config_file):
-        if os.path.exists(config_file):
-            logging.info("配置文件存在，绝对路径：%s", os.path.abspath(config_file))
-        else:
-            logging.info("%s配置文件不存在", config_file)
+    @classmethod
+    def from_yaml(cls, config_file: str, mode: str = 'bot') -> 'Config':
+        return cls(config_file, mode=mode)
 
-        self.config = load_config(config_file)
+    @classmethod
+    def from_dict(cls, config_data: dict[str, Any], mode: str = 'bot') -> 'Config':
+        return cls(copy.deepcopy(config_data), mode=mode)
+
+    def __init__(self, config_source, mode: str = 'bot'):
+        if isinstance(config_source, dict):
+            self.config = copy.deepcopy(config_source)
+        else:
+            config_file = str(config_source)
+            if os.path.exists(config_file):
+                logging.info("配置文件存在，绝对路径：%s", os.path.abspath(config_file))
+            else:
+                logging.info("%s配置文件不存在", config_file)
+            self.config = load_config(config_file)
+        if mode not in {'bot', 'web'}:
+            raise ConfigValidationError("Config mode 只支持 bot 或 web")
+        self.mode = mode
+
         if not isinstance(self.config, dict):
             raise ConfigValidationError("config.yaml 顶层结构必须是对象，且至少包含 app 配置")
 
@@ -181,13 +196,26 @@ class Config:
         if self.exchange_type == 'okx' and not self.exchange_password.strip():
             raise ConfigValidationError("使用 OKX 时，配置项 app.exchange.password 不能为空")
 
-        trade_cfg = _require_mapping(app_cfg.get('trade'), 'app.trade')
+        trade_raw = app_cfg.get('trade')
+        trade_cfg = _require_mapping(trade_raw, 'app.trade') if trade_raw is not None else {}
+        has_trade_task_fields = any(key in trade_cfg for key in ('sandbox_trade', 'symbol', 'timeframe', 'limit', 'strategy'))
+        if self.mode == 'bot' and not has_trade_task_fields:
+            raise ConfigValidationError(
+                'Bot/CLI 模式要求在 app.trade 中提供任务级配置：sandbox_trade、symbol、timeframe、limit、strategy'
+            )
+
         self.trade_sandbox_trade = _require_bool(trade_cfg.get('sandbox_trade', True), 'app.trade.sandbox_trade')
         self.trade_symbol = _require_non_empty_string(trade_cfg.get('symbol', 'BTC/USDT'), 'app.trade.symbol')
         self.trade_timeframe = _require_positive_int(trade_cfg.get('timeframe', 15), 'app.trade.timeframe')
         self.trade_limit = _require_positive_int(trade_cfg.get('limit', 100), 'app.trade.limit')
 
-        strategy_cfg = _require_mapping(trade_cfg.get('strategy'), 'app.trade.strategy')
+        strategy_raw = trade_cfg.get('strategy')
+        if strategy_raw is None:
+            if self.mode == 'bot':
+                raise ConfigValidationError('Bot/CLI 模式要求提供配置项 app.trade.strategy')
+            strategy_cfg = {}
+        else:
+            strategy_cfg = _require_mapping(strategy_raw, 'app.trade.strategy')
         self.trade_strategy_type = _require_non_empty_string(strategy_cfg.get('type', 'gpt'), 'app.trade.strategy.type')
         if self.trade_strategy_type not in {'gpt', 'btc_spot_breakout'}:
             raise ConfigValidationError("配置项 app.trade.strategy.type 只支持 gpt 或 btc_spot_breakout")
