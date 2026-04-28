@@ -123,7 +123,8 @@ class TradingBot:
             limit=self.required_history,
         )
         context_timeframes = list(self.market_data_requirements.get('context_timeframes') or [])
-        if not context_timeframes:
+        extra_feeds = list(self.market_data_requirements.get('extra_feeds') or [])
+        if not context_timeframes and not extra_feeds:
             return primary_data
 
         contexts = {}
@@ -139,11 +140,159 @@ class TradingBot:
             )
             contexts[timeframe] = self._trim_context_market_data(context_data, decision_ts)
 
+        feeds = self._load_extra_feeds(extra_feeds)
         merged_data = dict(primary_data)
         merged_data['primary'] = primary_data
         merged_data['contexts'] = contexts
+        merged_data['feeds'] = feeds
         merged_data['decisionTimestamp'] = decision_ts
         return merged_data
+
+    def _load_extra_feeds(self, feed_requirements: list[dict]) -> dict:
+        feeds = {}
+        for requirement in feed_requirements:
+            feed_type = str(requirement.get('type') or '').strip()
+            if not feed_type:
+                continue
+            try:
+                if feed_type == 'trade_flow':
+                    feeds[feed_type] = self._build_trade_flow_feed(requirement)
+                    continue
+                logging.warning('检测到未支持的扩展 feed 类型: %s', feed_type)
+                feeds[feed_type] = {
+                    'feedType': feed_type,
+                    'available': False,
+                    'required': bool(requirement.get('required')),
+                    'reason': f'暂不支持的 feed 类型: {feed_type}',
+                    'payload': {},
+                    'meta': dict(requirement.get('params') or {}),
+                }
+            except Exception as exc:
+                logging.error('加载扩展 feed 失败: feed_type=%s error=%s', feed_type, exc)
+                feeds[feed_type] = {
+                    'feedType': feed_type,
+                    'available': False,
+                    'required': bool(requirement.get('required')),
+                    'reason': f'feed 加载失败: {exc}',
+                    'payload': {},
+                    'meta': dict(requirement.get('params') or {}),
+                }
+        return feeds
+
+    def _build_trade_flow_feed(self, requirement: dict) -> dict:
+        params = dict(requirement.get('params') or {})
+        lookback_trades = max(int(params.get('lookback_trades', 200) or 200), 20)
+        freshness_seconds = int(requirement.get('freshness_seconds') or 0)
+        raw_trades = self.market_data_fetcher.fetch_recent_trades(self.config.trade_symbol, limit=lookback_trades)
+        trades = [item for item in raw_trades if isinstance(item, dict)]
+        if not trades:
+            return {
+                'feedType': 'trade_flow',
+                'available': False,
+                'required': bool(requirement.get('required')),
+                'reason': '未获取到近期成交数据',
+                'payload': {},
+                'meta': {
+                    'lookbackTrades': lookback_trades,
+                    'freshnessSeconds': freshness_seconds,
+                },
+            }
+
+        buy_count = 0
+        sell_count = 0
+        buy_notional = 0.0
+        sell_notional = 0.0
+        latest_timestamp = None
+        latest_price = None
+        for item in trades:
+            amount = self._to_float(item.get('amount')) or 0.0
+            price = self._to_float(item.get('price')) or 0.0
+            side = str(item.get('side') or '').lower()
+            timestamp = item.get('timestamp')
+            if isinstance(timestamp, (int, float)):
+                latest_timestamp = max(int(timestamp), latest_timestamp or int(timestamp))
+            if price > 0:
+                latest_price = price
+            notional = amount * price
+            if side == 'buy':
+                buy_count += 1
+                buy_notional += notional
+            elif side == 'sell':
+                sell_count += 1
+                sell_notional += notional
+
+        total_count = buy_count + sell_count
+        total_notional = buy_notional + sell_notional
+        if total_count <= 0 or total_notional <= 0:
+            return {
+                'feedType': 'trade_flow',
+                'available': False,
+                'required': bool(requirement.get('required')),
+                'reason': '近期成交缺少可用方向或金额信息',
+                'payload': {},
+                'meta': {
+                    'lookbackTrades': lookback_trades,
+                    'latestTimestamp': latest_timestamp,
+                    'freshnessSeconds': freshness_seconds,
+                },
+            }
+
+        now_ms = int(time.time() * 1000)
+        if latest_timestamp is None:
+            return {
+                'feedType': 'trade_flow',
+                'available': False,
+                'required': bool(requirement.get('required')),
+                'reason': '近期成交缺少有效时间戳',
+                'payload': {},
+                'meta': {
+                    'lookbackTrades': lookback_trades,
+                    'tradeCount': total_count,
+                    'freshnessSeconds': freshness_seconds,
+                },
+            }
+        age_seconds = max((now_ms - latest_timestamp) / 1000, 0.0)
+        if freshness_seconds > 0 and age_seconds > freshness_seconds:
+            return {
+                'feedType': 'trade_flow',
+                'available': False,
+                'required': bool(requirement.get('required')),
+                'reason': f'trade_flow 数据已过期，最新成交距今 {age_seconds:.1f} 秒',
+                'asOf': self._timestamp_ms_to_iso(latest_timestamp),
+                'payload': {},
+                'meta': {
+                    'lookbackTrades': lookback_trades,
+                    'tradeCount': total_count,
+                    'latestTimestamp': latest_timestamp,
+                    'freshnessSeconds': freshness_seconds,
+                    'ageSeconds': age_seconds,
+                },
+            }
+
+        as_of = self._timestamp_ms_to_iso(latest_timestamp) if latest_timestamp is not None else None
+        payload = {
+            'buy_count': buy_count,
+            'sell_count': sell_count,
+            'buy_ratio': buy_count / total_count,
+            'buy_notional': buy_notional,
+            'sell_notional': sell_notional,
+            'notional_imbalance': (buy_notional - sell_notional) / total_notional,
+            'latest_price': latest_price,
+            'latest_timestamp': latest_timestamp,
+        }
+        return {
+            'feedType': 'trade_flow',
+            'available': True,
+            'required': bool(requirement.get('required')),
+            'reason': '近期成交数据加载成功',
+            'asOf': as_of,
+            'freshnessSeconds': freshness_seconds,
+            'payload': payload,
+            'meta': {
+                'lookbackTrades': lookback_trades,
+                'tradeCount': total_count,
+            },
+        }
 
     @staticmethod
     def _trim_context_market_data(context_data: dict, decision_ts: int) -> dict:
@@ -178,6 +327,28 @@ class TradingBot:
         }
         trimmed['technicals'] = {}
         return trimmed
+
+    @staticmethod
+    def _to_float(value) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return float(text)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _timestamp_ms_to_iso(timestamp_ms: int | None) -> str | None:
+        if timestamp_ms is None:
+            return None
+        return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(timestamp_ms / 1000))
 
     @staticmethod
     def _timeframe_to_seconds(timeframe: str) -> int:

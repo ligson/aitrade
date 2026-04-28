@@ -15,6 +15,7 @@ from .exceptions import ApiError
 from .modules.auth.router import router as auth_router
 from .modules.backtests.router import router as backtests_router
 from .modules.strategies.router import router as strategies_router
+from .modules.strategies.signal_sources import router as signal_sources_router
 from .modules.system.router import router as system_router
 from .modules.system.service import SystemService
 from .modules.system.trade_task_service import TradeTaskService
@@ -88,6 +89,7 @@ def create_app(config: Config) -> FastAPI:
     app.include_router(users_router, prefix='/api/users', tags=['users'])
     app.include_router(trade_logs_router, prefix='/api/trade-logs', tags=['trade-logs'])
     app.include_router(strategies_router, prefix='/api/strategies', tags=['strategies'])
+    app.include_router(signal_sources_router, prefix='/api/signal-sources', tags=['signal-sources'])
     app.include_router(backtests_router, prefix='/api/backtests', tags=['backtests'])
     app.include_router(system_router, prefix='/api/system', tags=['system'])
     return app

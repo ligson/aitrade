@@ -16,7 +16,11 @@
 
           <a-table :data-source="profiles" :columns="profileColumns" row-key="id" :pagination="false" :scroll="{ x: 'max-content' }">
             <template #bodyCell="{ column, record, text }">
-              <template v-if="column.key === 'enabled'">
+              <template v-if="column.key === 'strategyProfileName'">
+                <div>{{ record.strategyProfileName || '-' }}</div>
+                <div v-if="record.strategyProfile?.fusionSummary" class="cell-meta">{{ formatFusionSummary(record.strategyProfile.fusionSummary) }}</div>
+              </template>
+              <template v-else-if="column.key === 'enabled'">
                 <a-tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled ? '启用' : '停用' }}</a-tag>
               </template>
               <template v-else-if="column.key === 'tradeMode'">
@@ -50,7 +54,7 @@
       </a-card>
     </a-space>
 
-    <a-drawer v-model:open="detailOpen" title="交易任务配置详情" width="560">
+    <a-drawer v-model:open="detailOpen" title="交易任务配置详情" width="620">
       <template v-if="detailProfile">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="配置名称">{{ detailProfile.name }}</a-descriptions-item>
@@ -69,10 +73,18 @@
           <a-descriptions-item label="创建时间">{{ formatDateTime(detailProfile.createdAt) }}</a-descriptions-item>
           <a-descriptions-item label="更新时间">{{ formatDateTime(detailProfile.updatedAt) }}</a-descriptions-item>
         </a-descriptions>
+        <a-descriptions v-if="detailProfile.strategyProfile?.fusionSummary" :column="1" bordered size="small" style="margin-top: 16px">
+          <a-descriptions-item label="融合摘要">{{ formatFusionSummary(detailProfile.strategyProfile.fusionSummary) }}</a-descriptions-item>
+          <a-descriptions-item label="K 线节点数">{{ detailProfile.strategyProfile.fusionSummary.klineNodeCount }}</a-descriptions-item>
+          <a-descriptions-item label="信号源节点数">{{ detailProfile.strategyProfile.fusionSummary.signalSourceNodeCount }}</a-descriptions-item>
+          <a-descriptions-item label="最少可用节点数">{{ detailProfile.strategyProfile.fusionSummary.minAvailableNodes }}</a-descriptions-item>
+          <a-descriptions-item label="允许降级运行">{{ detailProfile.strategyProfile.fusionSummary.allowDegraded ? '是' : '否' }}</a-descriptions-item>
+          <a-descriptions-item label="固定周期约束">{{ detailProfile.strategyProfile.fusionSummary.requires1hTimeframe ? '包含固定 1h 节点' : '无' }}</a-descriptions-item>
+        </a-descriptions>
       </template>
     </a-drawer>
 
-    <a-drawer v-model:open="editOpen" :title="form.id ? '编辑交易任务配置' : '新增交易任务配置'" width="560">
+    <a-drawer v-model:open="editOpen" :title="form.id ? '编辑交易任务配置' : '新增交易任务配置'" width="620">
       <a-form layout="vertical">
         <a-form-item label="配置名称">
           <a-input v-model:value="form.name" />
@@ -86,6 +98,9 @@
               {{ item.name }}
             </a-select-option>
           </a-select>
+          <div v-if="selectedStrategyProfile?.fusionSummary" class="field-help">
+            {{ formatFusionSummary(selectedStrategyProfile.fusionSummary) }}
+          </div>
         </a-form-item>
         <div class="form-grid">
           <a-form-item label="交易对">
@@ -152,16 +167,20 @@ import { useRouter } from 'vue-router'
 
 import { fetchStrategyProfiles } from '@/api/strategies'
 import { deleteTradeTaskProfile, fetchSystemSettings, fetchTradeTaskProfiles, saveTradeTaskProfile } from '@/api/system'
-import type { StrategyProfile } from '@/types/strategy'
+import type { FusionSummary, StrategyProfile } from '@/types/strategy'
 import type { TradeMode, TradeTaskProfile } from '@/types/system'
+
+type TradeTaskProfileRow = TradeTaskProfile & {
+  strategyProfile?: StrategyProfile
+}
 
 const router = useRouter()
 const detailOpen = ref(false)
 const editOpen = ref(false)
-const profiles = ref<TradeTaskProfile[]>([])
+const profiles = ref<TradeTaskProfileRow[]>([])
 const strategyProfiles = ref<StrategyProfile[]>([])
 const supportedTimeframes = ref<string[]>([])
-const detailProfile = ref<TradeTaskProfile | null>(null)
+const detailProfile = ref<TradeTaskProfileRow | null>(null)
 
 const form = reactive<{
   id?: number
@@ -196,7 +215,7 @@ const form = reactive<{
 
 const profileColumns = [
   { title: '配置名称', dataIndex: 'name', key: 'name', width: 220 },
-  { title: '策略配置', dataIndex: 'strategyProfileName', key: 'strategyProfileName', width: 220 },
+  { title: '策略配置', dataIndex: 'strategyProfileName', key: 'strategyProfileName', width: 260 },
   { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
   { title: '周期', dataIndex: 'timeframe', key: 'timeframe', width: 100 },
   { title: 'K线数量', dataIndex: 'tradeLimit', key: 'tradeLimit', width: 120 },
@@ -210,6 +229,8 @@ const profileColumns = [
 ]
 
 const enabledStrategyProfiles = computed(() => strategyProfiles.value.filter((item) => item.enabled))
+
+const selectedStrategyProfile = computed(() => enabledStrategyProfiles.value.find((item) => item.id === form.strategyProfileId))
 
 function filterSelectOption(input: string, option?: { children?: unknown; value?: unknown }) {
   const label = typeof option?.children === 'string' ? option.children : String(option?.value || '')
@@ -247,6 +268,24 @@ function formatRate(value: number | null | undefined) {
     return '-'
   }
   return `${(Number(value) * 100).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}%`
+}
+
+function formatFusionSummary(summary?: FusionSummary | null) {
+  if (!summary) {
+    return '-'
+  }
+  const parts = [
+    `${summary.klineNodeCount} 个 K 线节点`,
+    `${summary.signalSourceNodeCount} 个信号源`,
+    `最少 ${summary.minAvailableNodes} 个可用节点`,
+  ]
+  if (summary.requires1hTimeframe) {
+    parts.push('包含固定 1h 节点')
+  }
+  if (!summary.allowDegraded) {
+    parts.push('不允许降级')
+  }
+  return parts.join(' / ')
 }
 
 function strategyTypeLabel(value: string) {
@@ -309,7 +348,7 @@ async function openCreate() {
   editOpen.value = true
 }
 
-function openEdit(profile: TradeTaskProfile) {
+function openEdit(profile: TradeTaskProfileRow) {
   form.id = profile.id
   form.name = profile.name
   form.description = profile.description
@@ -327,7 +366,7 @@ function openEdit(profile: TradeTaskProfile) {
   editOpen.value = true
 }
 
-function openDetail(profile: TradeTaskProfile) {
+function openDetail(profile: TradeTaskProfileRow) {
   detailProfile.value = profile
   detailOpen.value = true
 }
@@ -341,7 +380,11 @@ function goToControl(profileId: number) {
 }
 
 async function loadProfiles() {
-  profiles.value = await fetchTradeTaskProfiles()
+  const profileList = await fetchTradeTaskProfiles()
+  profiles.value = profileList.map((profile) => ({
+    ...profile,
+    strategyProfile: strategyProfiles.value.find((item) => item.id === profile.strategyProfileId),
+  }))
 }
 
 async function loadStrategyProfiles() {
@@ -416,6 +459,15 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 0 16px;
+}
+
+.mode-help,
+.field-help,
+.cell-meta {
+  margin-top: 4px;
+  color: #8c8c8c;
+  font-size: 12px;
+  white-space: normal;
 }
 
 :deep(.ant-table-thead > tr > th) {

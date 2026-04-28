@@ -41,6 +41,48 @@ DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG = {
     'default_risk_per_trade': 0.01,
 }
 
+DEFAULT_SPOT_MULTI_SIGNAL_FUSION_CONFIG = {
+    'enable_technical_node': True,
+    'enable_trade_flow_node': True,
+    'enable_kline_breakout_node': False,
+    'enable_kline_trend_breakout_node': False,
+    'technical_weight': 0.6,
+    'trade_flow_weight': 0.4,
+    'kline_breakout_weight': 0.5,
+    'kline_trend_breakout_weight': 0.5,
+    'min_enabled_nodes': 1,
+    'allow_degraded': True,
+    'min_confidence': 0.55,
+    'buy_threshold': 0.55,
+    'sell_threshold': 0.55,
+    'default_risk_per_trade': 0.01,
+    'shared_atr_period': 14,
+    'shared_atr_stop_mult': 2.0,
+    'shared_atr_trail_mult': 3.0,
+    'technical_ema_period': 55,
+    'technical_breakout_lookback': 20,
+    'technical_rsi_buy_max': 68,
+    'technical_rsi_sell_min': 52,
+    'technical_require_macd': True,
+    'trade_flow_buy_ratio_threshold': 0.55,
+    'trade_flow_sell_ratio_threshold': 0.45,
+    'trade_flow_imbalance_threshold': 0.08,
+    'kline_breakout_confirm_macd': True,
+    'kline_breakout_confirm_volume': True,
+    'kline_breakout_volume_multiplier': 1.1,
+    'kline_breakout_breakout_buffer_bps': 10,
+    'kline_trend_breakout_adx_threshold': 25,
+    'kline_trend_breakout_volume_multiplier': 1.0,
+}
+
+DEFAULT_TRADE_MARKET_FEEDS_CONFIG = {
+    'trade_flow': {
+        'enabled': True,
+        'freshness_seconds': 120,
+        'lookback_trades': 200,
+    },
+}
+
 DEFAULT_TRADE_PERSISTENCE_CONFIG = {
     'enabled': True,
     'database_url': 'sqlite:///./.aitrade/trades.sqlite3',
@@ -183,6 +225,26 @@ def _normalize_trade_mode(trade_cfg, path_prefix='app.trade'):
     return 'sandbox' if sandbox_trade else 'live'
 
 
+def normalize_spot_multi_signal_fusion_config(raw_config: dict[str, Any] | None) -> dict[str, Any]:
+    source = dict(raw_config or {})
+    normalized = dict(DEFAULT_SPOT_MULTI_SIGNAL_FUSION_CONFIG)
+    legacy_aliases = {
+        'enable_technical_signal': 'enable_technical_node',
+        'enable_trade_flow_signal': 'enable_trade_flow_node',
+        'min_enabled_sources': 'min_enabled_nodes',
+        'atr_period': 'shared_atr_period',
+        'atr_stop_mult': 'shared_atr_stop_mult',
+        'atr_trail_mult': 'shared_atr_trail_mult',
+    }
+    for legacy_key, new_key in legacy_aliases.items():
+        if legacy_key in source and new_key not in source:
+            logging.info('检测到现货多源融合策略旧字段 %s，自动映射到 %s', legacy_key, new_key)
+            source[new_key] = source[legacy_key]
+        source.pop(legacy_key, None)
+    normalized.update(source)
+    return normalized
+
+
 class Config:
     @classmethod
     def from_yaml(cls, config_file: str, mode: str = 'bot') -> 'Config':
@@ -284,6 +346,17 @@ class Config:
         task_defaults_overrides = _require_mapping(task_defaults_overrides, 'app.trade.task_defaults')
         self.trade_task_defaults_config = merge_config(DEFAULT_TRADE_TASK_DEFAULTS_CONFIG, task_defaults_overrides)
 
+        market_feeds_overrides = trade_cfg.get('market_feeds', {})
+        if market_feeds_overrides is None:
+            market_feeds_overrides = {}
+        market_feeds_overrides = _require_mapping(market_feeds_overrides, 'app.trade.market_feeds')
+        self.trade_market_feeds_config = copy.deepcopy(DEFAULT_TRADE_MARKET_FEEDS_CONFIG)
+        trade_flow_feed_overrides = market_feeds_overrides.get('trade_flow', {})
+        if trade_flow_feed_overrides is None:
+            trade_flow_feed_overrides = {}
+        trade_flow_feed_overrides = _require_mapping(trade_flow_feed_overrides, 'app.trade.market_feeds.trade_flow')
+        self.trade_market_feeds_config['trade_flow'].update(trade_flow_feed_overrides)
+
         execution_overrides = trade_cfg.get('execution', {})
         if execution_overrides is None:
             execution_overrides = {}
@@ -298,14 +371,17 @@ class Config:
         else:
             strategy_cfg = _require_mapping(strategy_raw, 'app.trade.strategy')
         self.trade_strategy_type = _require_non_empty_string(strategy_cfg.get('type', 'gpt'), 'app.trade.strategy.type')
-        if self.trade_strategy_type not in {'gpt', 'btc_spot_breakout', 'btc_spot_trend_breakout'}:
-            raise ConfigValidationError("配置项 app.trade.strategy.type 只支持 gpt、btc_spot_breakout 或 btc_spot_trend_breakout")
+        if self.trade_strategy_type not in {'gpt', 'btc_spot_breakout', 'btc_spot_trend_breakout', 'spot_multi_signal_fusion'}:
+            raise ConfigValidationError("配置项 app.trade.strategy.type 只支持 gpt、btc_spot_breakout、btc_spot_trend_breakout 或 spot_multi_signal_fusion")
 
         self.trade_strategy_gpt_config = merge_config(DEFAULT_GPT_STRATEGY_CONFIG, strategy_cfg.get('gpt', {}))
         self.trade_strategy_btc_spot_config = merge_config(DEFAULT_BTC_SPOT_BREAKOUT_CONFIG, strategy_cfg.get('btc_spot_breakout', {}))
         self.trade_strategy_btc_spot_trend_breakout_config = merge_config(
             DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG,
             strategy_cfg.get('btc_spot_trend_breakout', {}),
+        )
+        self.trade_strategy_spot_multi_signal_fusion_config = normalize_spot_multi_signal_fusion_config(
+            strategy_cfg.get('spot_multi_signal_fusion', {}),
         )
 
         persistence_overrides = trade_cfg.get('persistence', {})
@@ -351,6 +427,11 @@ class Config:
             raise ConfigValidationError('配置项 app.trade.task_defaults.daily_loss_stop_threshold 必须大于 0')
         if self.trade_execution_config['daily_loss_stop_enabled'] and float(self.trade_execution_config['daily_loss_stop_threshold']) <= 0:
             raise ConfigValidationError('配置项 app.trade.execution.daily_loss_stop_threshold 必须大于 0')
+
+        trade_flow_feed_cfg = dict(self.trade_market_feeds_config.get('trade_flow') or {})
+        _require_bool(trade_flow_feed_cfg.get('enabled'), 'app.trade.market_feeds.trade_flow.enabled')
+        _require_positive_int(trade_flow_feed_cfg.get('freshness_seconds'), 'app.trade.market_feeds.trade_flow.freshness_seconds')
+        _require_positive_int(trade_flow_feed_cfg.get('lookback_trades'), 'app.trade.market_feeds.trade_flow.lookback_trades')
 
         web_overrides = app_cfg.get('web', {})
         if web_overrides is None:
@@ -475,6 +556,75 @@ class Config:
             _require_positive_number(btc_spot_trend_cfg.get(key), f'app.trade.strategy.btc_spot_trend_breakout.{key}')
         if int(btc_spot_trend_cfg.get('ema_fast_period')) >= int(btc_spot_trend_cfg.get('ema_slow_period')):
             raise ConfigValidationError('配置项 app.trade.strategy.btc_spot_trend_breakout.ema_fast_period 必须小于 ema_slow_period')
+
+        fusion_cfg = self.trade_strategy_spot_multi_signal_fusion_config
+        for key in ('technical_ema_period', 'technical_breakout_lookback', 'min_enabled_nodes', 'shared_atr_period'):
+            _require_positive_int(fusion_cfg.get(key), f'app.trade.strategy.spot_multi_signal_fusion.{key}')
+        for key in (
+            'technical_weight',
+            'trade_flow_weight',
+            'kline_breakout_weight',
+            'kline_trend_breakout_weight',
+            'min_confidence',
+            'buy_threshold',
+            'sell_threshold',
+            'technical_rsi_buy_max',
+            'technical_rsi_sell_min',
+            'trade_flow_buy_ratio_threshold',
+            'trade_flow_sell_ratio_threshold',
+            'trade_flow_imbalance_threshold',
+            'shared_atr_stop_mult',
+            'shared_atr_trail_mult',
+            'default_risk_per_trade',
+            'kline_breakout_volume_multiplier',
+            'kline_breakout_breakout_buffer_bps',
+            'kline_trend_breakout_adx_threshold',
+            'kline_trend_breakout_volume_multiplier',
+        ):
+            _require_positive_number(fusion_cfg.get(key), f'app.trade.strategy.spot_multi_signal_fusion.{key}')
+        for key in (
+            'enable_technical_node',
+            'enable_trade_flow_node',
+            'enable_kline_breakout_node',
+            'enable_kline_trend_breakout_node',
+            'allow_degraded',
+            'technical_require_macd',
+            'kline_breakout_confirm_macd',
+            'kline_breakout_confirm_volume',
+        ):
+            _require_bool(fusion_cfg.get(key), f'app.trade.strategy.spot_multi_signal_fusion.{key}')
+        for key in (
+            'technical_weight',
+            'trade_flow_weight',
+            'kline_breakout_weight',
+            'kline_trend_breakout_weight',
+            'min_confidence',
+            'buy_threshold',
+            'sell_threshold',
+            'trade_flow_buy_ratio_threshold',
+            'trade_flow_sell_ratio_threshold',
+            'default_risk_per_trade',
+        ):
+            if float(fusion_cfg.get(key)) > 1:
+                raise ConfigValidationError(f'配置项 app.trade.strategy.spot_multi_signal_fusion.{key} 不能大于 1')
+        if float(fusion_cfg.get('trade_flow_imbalance_threshold')) > 1:
+            raise ConfigValidationError('配置项 app.trade.strategy.spot_multi_signal_fusion.trade_flow_imbalance_threshold 不能大于 1')
+        if float(fusion_cfg.get('trade_flow_sell_ratio_threshold')) >= float(fusion_cfg.get('trade_flow_buy_ratio_threshold')):
+            raise ConfigValidationError('配置项 app.trade.strategy.spot_multi_signal_fusion.trade_flow_sell_ratio_threshold 必须小于 trade_flow_buy_ratio_threshold')
+        enabled_node_count = sum(
+            1
+            for key in (
+                'enable_technical_node',
+                'enable_trade_flow_node',
+                'enable_kline_breakout_node',
+                'enable_kline_trend_breakout_node',
+            )
+            if bool(fusion_cfg.get(key))
+        )
+        if enabled_node_count <= 0:
+            raise ConfigValidationError('配置项 app.trade.strategy.spot_multi_signal_fusion 至少要启用一种信号节点')
+        if int(fusion_cfg.get('min_enabled_nodes')) > enabled_node_count:
+            raise ConfigValidationError('配置项 app.trade.strategy.spot_multi_signal_fusion.min_enabled_nodes 不能大于已启用信号节点数')
 
         logging.info(
             '配置初始化完成: mode=%s provider=%s strategy_type=%s persistence_enabled=%s custom_gpt_base_url=%s',

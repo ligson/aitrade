@@ -15,6 +15,7 @@ class BaseStrategy(ABC):
         return {
             'primary_timeframe': None,
             'context_timeframes': [],
+            'extra_feeds': [],
         }
 
     @abstractmethod

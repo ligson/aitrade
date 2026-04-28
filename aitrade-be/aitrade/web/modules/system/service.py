@@ -140,8 +140,17 @@ class SystemService:
         for key in ('fee_rate', 'slippage_rate', 'daily_loss_stop_enabled', 'daily_loss_stop_threshold'):
             if key in task_defaults_override:
                 task_defaults_cfg[key] = task_defaults_override[key]
+        market_feeds_cfg = dict(trade_cfg.get('market_feeds') or {})
+        market_feeds_override = dict(trade_override.get('market_feeds') or {})
+        trade_flow_cfg = dict(market_feeds_cfg.get('trade_flow') or {})
+        trade_flow_override = dict(market_feeds_override.get('trade_flow') or {})
+        for key in ('enabled', 'freshness_seconds', 'lookback_trades'):
+            if key in trade_flow_override:
+                trade_flow_cfg[key] = trade_flow_override[key]
+        market_feeds_cfg['trade_flow'] = trade_flow_cfg
         trade_cfg['persistence'] = persistence_cfg
         trade_cfg['task_defaults'] = task_defaults_cfg
+        trade_cfg['market_feeds'] = market_feeds_cfg
         app_cfg['trade'] = trade_cfg
 
         backtest_cfg = dict(app_cfg.get('backtest') or {})
@@ -162,6 +171,22 @@ class SystemService:
         config_data['app'] = app_cfg
         logging.debug('构建系统设置生效配置完成: 覆盖域=%s', ['gpt', 'trade.persistence', 'backtest'])
         return config_data
+
+    def get_runtime_default_snapshots(self) -> dict[str, Any]:
+        effective_config, _ = self.get_effective_config()
+        return {
+            'tradeFlow': {
+                'enabled': bool((effective_config.trade_market_feeds_config.get('trade_flow') or {}).get('enabled', True)),
+                'freshnessSeconds': int((effective_config.trade_market_feeds_config.get('trade_flow') or {}).get('freshness_seconds', 120)),
+                'lookbackTrades': int((effective_config.trade_market_feeds_config.get('trade_flow') or {}).get('lookback_trades', 200)),
+            },
+            'taskDefaults': {
+                'feeRate': float(effective_config.trade_task_defaults_config['fee_rate']),
+                'slippageRate': float(effective_config.trade_task_defaults_config['slippage_rate']),
+                'dailyLossStopEnabled': bool(effective_config.trade_task_defaults_config['daily_loss_stop_enabled']),
+                'dailyLossStopThreshold': float(effective_config.trade_task_defaults_config['daily_loss_stop_threshold']),
+            },
+        }
 
     def list_log_files(self, offset: int, size: int, keyword: str = '', log_type: str = '') -> tuple[int, list[dict[str, Any]]]:
         rows: list[dict[str, Any]] = []
@@ -251,6 +276,9 @@ class SystemService:
                 'tradeTaskDefaultSlippageRate': self.config.trade_task_defaults_config['slippage_rate'],
                 'tradeTaskDefaultDailyLossStopEnabled': self.config.trade_task_defaults_config['daily_loss_stop_enabled'],
                 'tradeTaskDefaultDailyLossStopThreshold': self.config.trade_task_defaults_config['daily_loss_stop_threshold'],
+                'tradeFlowFeedEnabled': self.config.trade_market_feeds_config['trade_flow']['enabled'],
+                'tradeFlowFeedFreshnessSeconds': self.config.trade_market_feeds_config['trade_flow']['freshness_seconds'],
+                'tradeFlowFeedLookbackTrades': self.config.trade_market_feeds_config['trade_flow']['lookback_trades'],
                 'supportedSymbols': list(self.config.backtest_config['supported_symbols']),
                 'supportedTimeframes': list(self.config.backtest_config['supported_timeframes']),
                 'defaultSymbol': self.config.backtest_config['default_symbol'],
@@ -275,6 +303,9 @@ class SystemService:
             'tradeTaskDefaultSlippageRate': float(config.trade_task_defaults_config['slippage_rate']),
             'tradeTaskDefaultDailyLossStopEnabled': bool(config.trade_task_defaults_config['daily_loss_stop_enabled']),
             'tradeTaskDefaultDailyLossStopThreshold': float(config.trade_task_defaults_config['daily_loss_stop_threshold']),
+            'tradeFlowFeedEnabled': bool((config.trade_market_feeds_config.get('trade_flow') or {}).get('enabled', True)),
+            'tradeFlowFeedFreshnessSeconds': int((config.trade_market_feeds_config.get('trade_flow') or {}).get('freshness_seconds', 120)),
+            'tradeFlowFeedLookbackTrades': int((config.trade_market_feeds_config.get('trade_flow') or {}).get('lookback_trades', 200)),
             'supportedSymbols': list(config.backtest_config['supported_symbols']),
             'supportedTimeframes': list(config.backtest_config['supported_timeframes']),
             'defaultSymbol': config.backtest_config['default_symbol'],
@@ -311,6 +342,18 @@ class SystemService:
             'tradeTaskDefaultDailyLossStopThreshold': trade_params.get('task_defaults', {}).get(
                 'daily_loss_stop_threshold',
                 self.config.trade_task_defaults_config['daily_loss_stop_threshold'],
+            ),
+            'tradeFlowFeedEnabled': trade_params.get('market_feeds', {}).get('trade_flow', {}).get(
+                'enabled',
+                self.config.trade_market_feeds_config['trade_flow']['enabled'],
+            ),
+            'tradeFlowFeedFreshnessSeconds': trade_params.get('market_feeds', {}).get('trade_flow', {}).get(
+                'freshness_seconds',
+                self.config.trade_market_feeds_config['trade_flow']['freshness_seconds'],
+            ),
+            'tradeFlowFeedLookbackTrades': trade_params.get('market_feeds', {}).get('trade_flow', {}).get(
+                'lookback_trades',
+                self.config.trade_market_feeds_config['trade_flow']['lookback_trades'],
             ),
             'supportedSymbols': backtest_params.get('supported_symbols', self.config.backtest_config['supported_symbols']),
             'supportedTimeframes': backtest_params.get('supported_timeframes', self.config.backtest_config['supported_timeframes']),
@@ -357,6 +400,17 @@ class SystemService:
         )
         if trade_task_default_daily_loss_stop_enabled and trade_task_default_daily_loss_stop_threshold <= 0:
             raise ValidationError('启用交易任务默认单日亏损停机时，阈值必须大于 0')
+        trade_flow_feed_enabled = editable.get('tradeFlowFeedEnabled')
+        if not isinstance(trade_flow_feed_enabled, bool):
+            raise ValidationError('是否启用成交流 feed 必须是布尔值')
+        trade_flow_feed_freshness_seconds = self._normalize_positive_int(
+            editable.get('tradeFlowFeedFreshnessSeconds'),
+            '成交流 feed 新鲜度秒数',
+        )
+        trade_flow_feed_lookback_trades = self._normalize_positive_int(
+            editable.get('tradeFlowFeedLookbackTrades'),
+            '成交流 feed 回看成交数',
+        )
         supported_symbols = self._normalize_string_list(editable.get('supportedSymbols'), '支持交易对')
         supported_timeframes = self._normalize_string_list(editable.get('supportedTimeframes'), '支持周期')
         default_symbol = str(editable.get('defaultSymbol') or '').strip()
@@ -396,6 +450,13 @@ class SystemService:
                     'daily_loss_stop_enabled': trade_task_default_daily_loss_stop_enabled,
                     'daily_loss_stop_threshold': trade_task_default_daily_loss_stop_threshold,
                 },
+                'market_feeds': {
+                    'trade_flow': {
+                        'enabled': trade_flow_feed_enabled,
+                        'freshness_seconds': trade_flow_feed_freshness_seconds,
+                        'lookback_trades': trade_flow_feed_lookback_trades,
+                    },
+                },
             },
             'backtest': {
                 'supported_symbols': supported_symbols,
@@ -433,6 +494,15 @@ class SystemService:
         normalized = float(value)
         if normalized < 0:
             raise ValidationError(f'{label}不能小于 0')
+        return normalized
+
+    @staticmethod
+    def _normalize_positive_int(value: Any, label: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValidationError(f'{label}必须是正整数')
+        normalized = int(value)
+        if normalized <= 0:
+            raise ValidationError(f'{label}必须大于 0')
         return normalized
 
     @staticmethod

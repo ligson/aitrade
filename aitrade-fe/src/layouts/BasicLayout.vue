@@ -108,6 +108,7 @@ const menuGroups: MenuGroup[] = [
     icon: HistoryOutlined,
     children: [
       { key: 'strategies', title: '策略配置', icon: SettingOutlined, routePath: '/strategies' },
+      { key: 'signal-sources', title: '信号源配置', icon: DatabaseOutlined, routePath: '/signal-sources' },
       { key: 'backtests', title: '策略回测', icon: HistoryOutlined, routePath: '/backtests' },
     ],
   },

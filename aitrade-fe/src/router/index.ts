@@ -11,6 +11,7 @@ const TradeTaskProfileView = () => import('@/views/trade-logs/TradeTaskProfileVi
 const TradeTaskControlView = () => import('@/views/trade-logs/TradeTaskControlView.vue')
 const TradeTaskLogView = () => import('@/views/trade-logs/TradeTaskLogView.vue')
 const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.vue')
+const SignalSourceConfigView = () => import('@/views/strategies/SignalSourceConfigView.vue')
 const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
 const BacktestView = () => import('@/views/backtests/BacktestView.vue')
 const SystemSettingsView = () => import('@/views/system/SystemSettingsView.vue')
@@ -136,6 +137,15 @@ const router = createRouter({
           meta: {
             title: '策略配置',
             breadcrumb: ['策略中心', '策略配置'],
+          },
+        },
+        {
+          path: 'signal-sources',
+          name: 'signal-sources',
+          component: SignalSourceConfigView,
+          meta: {
+            title: '信号源配置',
+            breadcrumb: ['策略中心', '信号源配置'],
           },
         },
         {

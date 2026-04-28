@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from ...exceptions import ValidationError
+from ....trade.strategies.fusion_profile import normalize_fusion_strategy_profile_config
 
 
 def normalize_strategy_params(definition: dict, params: dict) -> dict:
     if not isinstance(params, dict):
         raise ValidationError('策略参数必须是对象')
+    if definition.get('strategyType') == 'spot_multi_signal_fusion':
+        return normalize_fusion_strategy_profile_config(params)
     normalized = dict(definition['defaultParams'])
     normalized.update(params)
     schema_by_field = {item['field']: item for item in definition['paramSchema']}

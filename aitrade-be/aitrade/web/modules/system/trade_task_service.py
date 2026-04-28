@@ -18,6 +18,7 @@ from sqlalchemy import text
 from ....config.config_file import Config
 from ....config.config_file import ConfigValidationError
 from ....db import Base
+from ....db import SignalSourceProfileModel
 from ....db import StrategyProfileModel
 from ....db import TradeTaskLogModel
 from ....db import TradeTaskProfileModel
@@ -25,6 +26,9 @@ from ....db import TradeTaskRunModel
 from ....db import TradeTaskRuntimeModel
 from ....db.session import get_engine
 from ....db.session import get_session_factory
+from ....trade.strategies.fusion_profile import build_fusion_runtime_params
+from ....trade.strategies.fusion_profile import normalize_fusion_strategy_profile_config
+from ....trade.strategies.fusion_profile import summarize_fusion_strategy_profile_config
 from ....trade.strategies.registry import get_strategy_definition
 from ....trade.trade import OptimizedCryptoBot
 from ....trade.trading_system.trade_executor import TradingHaltError
@@ -127,6 +131,12 @@ class TradeTaskService:
                 raise ValidationError('所选策略配置已停用')
             if strategy_profile.strategy_type == 'btc_spot_trend_breakout' and timeframe != '1h':
                 raise ValidationError('BTC 现货趋势突破策略的交易任务周期当前固定为 1h')
+            if strategy_profile.strategy_type == 'spot_multi_signal_fusion':
+                definition = get_strategy_definition(strategy_profile.strategy_type)
+                normalized_params = normalize_strategy_params(definition, json.loads(strategy_profile.params_json or '{}'))
+                fusion_summary = summarize_fusion_strategy_profile_config(normalized_params)
+                if fusion_summary['requires1hTimeframe'] and timeframe != '1h':
+                    raise ValidationError('现货多源融合策略包含固定 1h 的趋势突破节点时，交易任务周期当前固定为 1h')
 
             if profile_id is None:
                 logging.info(
@@ -397,6 +407,14 @@ class TradeTaskService:
             now = self._now_iso()
             created_by = str(current_user.get('username') or current_user.get('nickname') or current_user.get('id') or '')
             trade_mode = self._normalize_trade_mode_value(profile.trade_mode, bool(profile.sandbox_trade))
+            runtime_defaults_snapshot = self.system_service.get_runtime_default_snapshots()
+            fusion_config_snapshot = None
+            kline_node_snapshots: list[dict[str, Any]] = []
+            signal_source_snapshots: list[dict[str, Any]] = []
+            if strategy_profile.strategy_type == 'spot_multi_signal_fusion':
+                fusion_config_snapshot = normalize_fusion_strategy_profile_config(normalized_params)
+                kline_node_snapshots = self._build_kline_node_snapshots(session, fusion_config_snapshot)
+                signal_source_snapshots = self._build_signal_source_snapshots(session, fusion_config_snapshot, runtime_defaults_snapshot)
             snapshot = {
                 'profileId': profile.id,
                 'profileName': profile.name,
@@ -406,11 +424,39 @@ class TradeTaskService:
                 'strategyType': strategy_profile.strategy_type,
                 'strategySchemaVersion': definition['schemaVersion'],
                 'strategyParams': normalized_params,
+                'strategyDefinitionSnapshot': {
+                    'strategyType': definition['strategyType'],
+                    'displayName': definition['displayName'],
+                    'description': definition['description'],
+                    'strategyCategory': definition.get('strategyCategory'),
+                    'configMode': definition.get('configMode'),
+                    'usableAsFusionNode': bool(definition.get('usableAsFusionNode', False)),
+                    'supportsSpot': bool(definition.get('supportsSpot', True)),
+                    'supportsPaper': bool(definition.get('supportsPaper', True)),
+                    'supportsBacktest': bool(definition.get('supportsBacktest', False)),
+                    'fixedConstraints': list(definition.get('fixedConstraints') or []),
+                    'schemaVersion': definition['schemaVersion'],
+                },
+                'strategyProfileSnapshot': {
+                    'id': strategy_profile.id,
+                    'name': strategy_profile.name,
+                    'description': strategy_profile.description,
+                    'enabled': bool(strategy_profile.enabled),
+                    'strategyType': strategy_profile.strategy_type,
+                    'schemaVersion': strategy_profile.schema_version,
+                },
+                'fusionConfigSnapshot': fusion_config_snapshot,
+                'klineNodeSnapshots': kline_node_snapshots,
+                'signalSourceSnapshots': signal_source_snapshots,
+                'systemDefaultsSnapshot': runtime_defaults_snapshot,
                 'symbol': profile.symbol,
                 'timeframe': profile.timeframe,
                 'tradeMode': trade_mode,
                 'sandboxTrade': trade_mode == 'sandbox',
                 'tradeLimit': int(profile.trade_limit),
+                'marketFeeds': {
+                    'tradeFlow': dict(runtime_defaults_snapshot.get('tradeFlow') or {}),
+                },
                 'execution': {
                     'feeRate': float(profile.fee_rate),
                     'slippageRate': float(profile.slippage_rate),
@@ -604,11 +650,18 @@ class TradeTaskService:
             if run is None:
                 raise NotFoundError('交易任务运行快照不存在')
             run_payload = self._serialize_run(run)
+        snapshot = dict(run_payload.get('snapshot') or {})
         config_data = self.system_service.build_effective_config_dict()
         app_cfg = dict(config_data.get('app') or {})
         trade_cfg = dict(app_cfg.get('trade') or {})
         strategy_cfg = dict(trade_cfg.get('strategy') or {})
         strategy_params = run_payload['strategyParams']
+        if run_payload['strategyType'] == 'spot_multi_signal_fusion':
+            strategy_params = build_fusion_runtime_params(
+                snapshot.get('fusionConfigSnapshot') or strategy_params,
+                list(snapshot.get('klineNodeSnapshots') or []),
+                list(snapshot.get('signalSourceSnapshots') or []),
+            )
         strategy_cfg['type'] = run_payload['strategyType']
         strategy_cfg[run_payload['strategyType']] = strategy_params
         trade_cfg['trade_mode'] = run_payload['tradeMode']
@@ -617,12 +670,21 @@ class TradeTaskService:
         trade_cfg['timeframe'] = self._timeframe_to_minutes(run_payload['timeframe'])
         trade_cfg['limit'] = int(run_payload['tradeLimit'])
         trade_cfg['strategy'] = strategy_cfg
-        execution_snapshot = dict(run_payload['snapshot'].get('execution') or {})
+        execution_snapshot = dict(snapshot.get('execution') or {})
         trade_cfg['execution'] = {
             'fee_rate': float(execution_snapshot.get('feeRate', run_payload['feeRate'])),
             'slippage_rate': float(execution_snapshot.get('slippageRate', run_payload['slippageRate'])),
             'daily_loss_stop_enabled': bool(execution_snapshot.get('dailyLossStopEnabled', run_payload['dailyLossStopEnabled'])),
             'daily_loss_stop_threshold': float(execution_snapshot.get('dailyLossStopThreshold', run_payload['dailyLossStopThreshold'])),
+        }
+        market_feeds_snapshot = dict(snapshot.get('marketFeeds') or {})
+        trade_flow_snapshot = dict(market_feeds_snapshot.get('tradeFlow') or {})
+        trade_cfg['market_feeds'] = {
+            'trade_flow': {
+                'enabled': bool(trade_flow_snapshot.get('enabled', True)),
+                'freshness_seconds': int(trade_flow_snapshot.get('freshnessSeconds', 120) or 120),
+                'lookback_trades': int(trade_flow_snapshot.get('lookbackTrades', 200) or 200),
+            },
         }
         persistence_cfg = dict(trade_cfg.get('persistence') or {})
         persistence_cfg['execution'] = dict(trade_cfg['execution'])
@@ -630,14 +692,95 @@ class TradeTaskService:
         app_cfg['trade'] = trade_cfg
         config_data['app'] = app_cfg
         logging.debug(
-            '构建交易任务运行配置: run_id=%s strategy_type=%s symbol=%s timeframe=%s strategy_param_keys=%s',
+            '构建交易任务运行配置: run_id=%s strategy_type=%s symbol=%s timeframe=%s strategy_param_keys=%s trade_flow_enabled=%s',
             run_id,
             run_payload['strategyType'],
             run_payload['symbol'],
             run_payload['timeframe'],
             list(strategy_params.keys()),
+            trade_cfg['market_feeds']['trade_flow']['enabled'],
         )
         return Config.from_dict(config_data), run_payload
+
+    def _build_kline_node_snapshots(self, session, fusion_config: dict[str, Any]) -> list[dict[str, Any]]:
+        snapshots: list[dict[str, Any]] = []
+        for item in list(fusion_config.get('klineNodes') or []):
+            if not bool(item.get('enabled', True)):
+                continue
+            node_type = str(item.get('nodeType') or 'strategy_profile')
+            if node_type == 'builtin_technical':
+                snapshots.append({
+                    'nodeType': 'builtin_technical',
+                    'strategyProfileId': None,
+                    'strategyType': 'builtin_technical',
+                    'name': str(item.get('name') or '技术面节点'),
+                    'enabled': True,
+                    'weight': float(item.get('weight', 0.5)),
+                    'params': dict(item.get('params') or {}),
+                    'requires_1h_timeframe': False,
+                })
+                continue
+            strategy_profile_id = item.get('strategyProfileId')
+            if not strategy_profile_id:
+                raise ValidationError('融合策略 K 线节点缺少 strategyProfileId')
+            profile = session.get(StrategyProfileModel, int(strategy_profile_id))
+            if profile is None:
+                raise NotFoundError(f'融合策略引用的 K 线策略配置不存在: {strategy_profile_id}')
+            if not profile.enabled:
+                raise ValidationError(f'融合策略引用的 K 线策略配置已停用: {profile.name}')
+            definition = get_strategy_definition(profile.strategy_type)
+            if not bool(definition.get('usableAsFusionNode', False)):
+                raise ValidationError(f'策略 {profile.name} 当前不能作为融合节点')
+            profile_params = normalize_strategy_params(definition, json.loads(profile.params_json or '{}'))
+            snapshots.append({
+                'nodeType': 'strategy_profile',
+                'strategyProfileId': profile.id,
+                'strategyType': profile.strategy_type,
+                'name': str(item.get('name') or profile.name),
+                'enabled': True,
+                'weight': float(item.get('weight', 0.5)),
+                'params': profile_params,
+                'schemaVersion': profile.schema_version,
+                'description': profile.description,
+                'requires_1h_timeframe': profile.strategy_type == 'btc_spot_trend_breakout',
+            })
+        return snapshots
+
+    def _build_signal_source_snapshots(self, session, fusion_config: dict[str, Any], runtime_defaults: dict[str, Any]) -> list[dict[str, Any]]:
+        snapshots: list[dict[str, Any]] = []
+        for item in list(fusion_config.get('signalSourceNodes') or []):
+            if not bool(item.get('enabled', True)):
+                continue
+            source_profile_id = item.get('signalSourceProfileId')
+            if not source_profile_id:
+                raise ValidationError('融合策略信号源节点缺少 signalSourceProfileId')
+            profile = session.get(SignalSourceProfileModel, int(source_profile_id))
+            if profile is None:
+                raise NotFoundError(f'融合策略引用的信号源配置不存在: {source_profile_id}')
+            if not profile.enabled:
+                raise ValidationError(f'融合策略引用的信号源配置已停用: {profile.name}')
+            params = json.loads(profile.params_json or '{}')
+            merged_params = dict(params)
+            if profile.source_type == 'trade_flow':
+                merged_params = {
+                    'freshness_seconds': int((runtime_defaults.get('tradeFlow') or {}).get('freshnessSeconds', 120)),
+                    'lookback_trades': int((runtime_defaults.get('tradeFlow') or {}).get('lookbackTrades', 200)),
+                    **params,
+                    **dict(item.get('params') or {}),
+                }
+            snapshots.append({
+                'signalSourceProfileId': profile.id,
+                'sourceType': profile.source_type,
+                'name': str(item.get('name') or profile.name),
+                'enabled': True,
+                'required': bool(item.get('required', False)),
+                'weight': float(item.get('weight', 0.4)),
+                'thresholds': dict(item.get('thresholds') or {}),
+                'params': merged_params,
+                'schemaVersion': profile.schema_version,
+                'description': profile.description,
+            })
+        return snapshots
 
     def _wrap_status_payload(self, runtime: dict[str, Any]) -> dict[str, Any]:
         payload = dict(runtime)

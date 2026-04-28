@@ -19,6 +19,16 @@
 - 交易执行链路新增手续费、滑点与已实现净盈亏建模：`paper` 模式按配置估算成交价与双边手续费，`live / sandbox` 统一抽取成交摘要并在缺少交易所手续费回包时按配置估算，交易日志新增成交价、手续费、净盈亏与单日亏损快照展示。
 - 新增任务级“单日亏损停机”能力：按当前 `run_id + UTC 当日 + 卖出已实现净亏损` 聚合，达到阈值后写入 `risk_halt_triggered` 任务日志并把运行状态收敛为 `stopped`，不再误记为执行失败。
 - 整理仓库本地运行产物边界：清理仓库根目录历史残留的 `.aitrade/`、`logs/` 以及后端/前端构建产物、日志和 Python 缓存，并同步更新仓库级说明，明确后端运行态统一收敛在 `aitrade-be/` 下。
+- 将现货多源融合策略 `spot_multi_signal_fusion` 重构为第一阶段节点化融合器：支持按扁平参数选择 `technical_node / trade_flow_node / kline_breakout_node / kline_trend_breakout_node` 参与融合，并继续输出统一 `buy / sell / hold` 与 `signal_sources / signal_score / degraded / meta.node_signals` 便于排障。
+- 为现货多源融合策略补齐旧参数兼容归一：后端配置加载、策略保存校验、策略列表返回与任务运行快照统一兼容 `enable_*_signal / min_enabled_sources / atr_*` 等旧字段，并在新 schema 下归一为 `enable_*_node / min_enabled_nodes / shared_atr_*`。
+- 现货多源融合策略新增多周期节点约束：启用 `kline_trend_breakout_node` 时会声明 `4h` 上下文数据需求，交易任务配置也会强制校验主周期必须为 `1h`，避免静默降级导致信号失真。
+- `TradingBot` 新增扩展 feed 装配能力：在主周期与上下文周期之外，按策略声明加载 `extra_feeds`，首个落地 feed 为 `trade_flow`，并对过期成交数据按新鲜度阈值降级为不可用。
+- 系统设置与任务运行快照新增 `trade_flow` feed 默认参数：管理台“交易设置”页可维护启用开关、新鲜度秒数与回看成交数；新任务启动时会把这些值固化进 run snapshot，避免运行中被后续页面修改回写。
+- 策略注册表与前端动态表单已接入“现货多源融合策略”节点化参数 schema；当前仍显式标记 `backtestSupported=false`，先聚焦 `paper` 实时模拟验证，不承诺新闻/动态类信号的历史复现。
+- 策略中心升级为分类化配置模型：策略 definition 新增 `strategyCategory / configMode / usableAsFusionNode / supports* / fixedConstraints` 元信息，管理台可区分 `K 线 / GPT / AI / 融合` 四类策略，并在融合策略详情中展示固定周期约束与融合摘要。
+- 新增独立 `signal_source_profiles` 档案与 `api/signal-sources/*` 接口：第一阶段已落地信号源配置页，支持维护 `trade_flow / news / indicator / market_activity / external_signal` 五类信号源，其中 `trade_flow` 已接入运行时，其余类型先提供配置落点与详情展示。
+- 现货多源融合策略从“单个大表单参数集”升级为结构化 profile：策略配置改为维护 `klineNodes / signalSourceNodes / filters / riskControls / decisionPolicy`，前端新增 `FusionStrategyBuilder` 专用编辑器，支持选择已有 K 线策略档案与信号源档案参与融合。
+- 交易任务启动快照补齐融合冻结语义：run snapshot 现会固化 `strategyDefinitionSnapshot / strategyProfileSnapshot / fusionConfigSnapshot / klineNodeSnapshots / signalSourceSnapshots / systemDefaultsSnapshot`，运行中不再回查活跃策略档案或信号源档案，确保启动后配置修改不会回写影响已运行实例。
 
 ## 2026-04-25
 

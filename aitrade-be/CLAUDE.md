@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-`aitrade` 是一个小型 Python 自动交易机器人，当前支持三类可配置策略：
+`aitrade` 是一个小型 Python 自动交易机器人，当前支持四类可配置策略：
 - `gpt`：通过兼容 OpenAI 的客户端生成 AI 交易信号
 - `btc_spot_breakout`：面向 BTC 现货的 long-only 单周期规则突破策略
 - `btc_spot_trend_breakout`：面向 BTC 现货的 long-only 趋势突破策略，固定 `1h` 执行并使用 `4h` 趋势过滤
+- `spot_multi_signal_fusion`：面向现货的结构化多源融合策略，可选择已有 K 线策略档案、内建技术面节点和独立信号源档案参与融合
 
 当前文件所在目录 `aitrade-be/` 是后端项目根目录。
 
@@ -112,6 +113,7 @@ Web 场景下，`config.yaml` 需要保留的顶层结构包括：
 - 当前允许网页维护的主要是 `app.gpt.provider / model / api_key / base_url`、`app.trade.persistence.persist_position / restore_position_on_startup`、`app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
 - `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次创建系统设置记录时，会基于文件中的当前值或运行时默认值补齐
 - `app.exchange.*`、`app.web.jwt_secret`、`app.trade.persistence.database_url`、`app.http_client.*`、`app.web.host/port/debug/show_trace/cors_allow_origins`、`app.backtest.data_dir/user_data_dir/freqtrade_bin` 等敏感或部署期配置仍只来自 `config.yaml`
+- 融合策略与信号源的可复用实例配置不再放入 `config.yaml`，而是通过 `strategy_profiles` 与新增的 `signal_source_profiles` 在管理台维护；任务启动时会把引用关系和实际生效参数一起冻结到 run snapshot
 
 仅在 Bot/CLI 直跑场景下，才额外要求：
 - `app.trade.sandbox_trade`
@@ -179,6 +181,8 @@ app:
 - `btc_spot_breakout_strategy.py`：BTC 现货突破策略
 - `btc_spot_trend_breakout_strategy.py`：BTC 现货趋势突破策略
 - `factory.py`：根据配置创建策略实例
+- `fusion_profile.py`：融合策略结构化 profile 的兼容归一、摘要生成和运行时参数适配
+- `signal_source_registry.py`：信号源 definition 注册表，维护 source type、默认参数与 schema
 
 `GPTStrategy` 自身负责最小置信度阈值，不再由 `TradingBot` 写死全局 `0.7`。
 
@@ -215,6 +219,7 @@ app:
 - 当前缺少测试，验证方式以手工和定向检查为主。
 - 15 分钟 BTC 突破策略已做过滤，但仍可能受噪音影响，优先建议沙盒联调。
 - `btc_spot_trend_breakout` 当前固定使用 `1h` 执行周期和 `4h` 趋势过滤；不要在页面或实现里把它放宽为任意周期组合。
+- `spot_multi_signal_fusion` 若所选 K 线节点中包含 `btc_spot_trend_breakout`，同样必须固定使用 `1h` 主周期并加载 `4h` 上下文数据；不要静默降级成单周期运行。
 - 如果修改 live / backtest 的多周期装配逻辑，必须确保 `4h` 上下文数据在任一 `1h` 决策点都只使用当时已闭合的 K 线，避免未来数据泄漏。
 - 修改脚本或文档时，要确保命令与仓库里实际存在的脚本和入口保持一致。
 - 修改 `*.sh` 脚本时，默认要同时兼容 macOS 与 Linux；优先使用两边都支持的命令、选项和路径处理方式，不要依赖 GNU 独有参数。

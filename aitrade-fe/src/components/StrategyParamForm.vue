@@ -7,6 +7,11 @@
           :checked="Boolean(modelValue[field.field])"
           @change="updateBooleanField(field.field, $event)"
         />
+        <a-input
+          v-else-if="field.type === 'string'"
+          :value="stringValue(field.field)"
+          @update:value="updateStringField(field.field, $event)"
+        />
         <a-input-number
           v-else
           :value="numberValue(field.field)"
@@ -45,7 +50,11 @@ function updateBooleanField(field: string, checked: boolean) {
   updateField(field, checked)
 }
 
-function updateNumberField(field: string, type: 'number' | 'integer' | 'boolean', value: number | string | null) {
+function updateStringField(field: string, value: string) {
+  updateField(field, value)
+}
+
+function updateNumberField(field: string, type: 'number' | 'integer' | 'boolean' | 'string', value: number | string | null) {
   updateField(field, normalizeNumber(type, value))
 }
 
@@ -54,7 +63,12 @@ function numberValue(field: string) {
   return typeof value === 'number' ? value : undefined
 }
 
-function normalizeNumber(type: 'number' | 'integer' | 'boolean', value: number | string | null) {
+function stringValue(field: string) {
+  const value = props.modelValue[field]
+  return typeof value === 'string' ? value : ''
+}
+
+function normalizeNumber(type: 'number' | 'integer' | 'boolean' | 'string', value: number | string | null) {
   if (value == null || value === '') {
     return undefined
   }

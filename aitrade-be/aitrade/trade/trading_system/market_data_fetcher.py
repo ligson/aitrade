@@ -95,6 +95,16 @@ class MarketDataFetcher:
         logging.debug("市场数据获取完成，当前价格: %s", closes[-1])
         return market_data
 
+    def fetch_recent_trades(self, symbol: str, limit: int = 200) -> List[Dict[str, Any]]:
+        try:
+            logging.info("获取 %s 的近期成交数据，条数: %s", symbol, limit)
+            trades = self.exchange.fetch_trades(symbol, limit=limit)
+            logging.info("成功获取 %s 条成交数据", len(trades))
+            return trades
+        except Exception as exc:
+            logging.error("获取近期成交数据失败: symbol=%s limit=%s error=%s", symbol, limit, exc)
+            raise
+
     def _calculate_technical_indicators(self, closes: List[float], highs: List[float], lows: List[float], volumes: List[float]) -> Dict[str, Any]:
         logging.debug("开始计算技术指标")
 

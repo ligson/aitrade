@@ -24,6 +24,9 @@ export interface SystemSettingsEditable {
   tradeTaskDefaultSlippageRate: number
   tradeTaskDefaultDailyLossStopEnabled: boolean
   tradeTaskDefaultDailyLossStopThreshold: number
+  tradeFlowFeedEnabled: boolean
+  tradeFlowFeedFreshnessSeconds: number
+  tradeFlowFeedLookbackTrades: number
   supportedSymbols: string[]
   supportedTimeframes: string[]
   defaultSymbol: string

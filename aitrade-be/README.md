@@ -12,7 +12,7 @@ A simple trading system for AI.
 
 1. 复制 `config.example.yaml` 为 `config.yaml`
 2. Web 场景下，`config.yaml` 只需要保留仍然由文件负责的系统级配置：交易所凭证、代理、Web 服务参数、持久化数据库连接，以及回测目录/外部命令
-3. Web 管理台中的“系统设置”页会把一部分系统参数保存到数据库，其中 AI 设置页负责 `app.gpt.provider / model / api_key / base_url`，交易设置页负责 `app.trade.persistence.persist_position / restore_position_on_startup`，数据设置页负责 `app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
+3. Web 管理台中的“系统设置”页会把一部分系统参数保存到数据库，其中 AI 设置页负责 `app.gpt.provider / model / api_key / base_url`，交易设置页负责 `app.trade.persistence.persist_position / restore_position_on_startup`、`app.trade.market_feeds.trade_flow.*`，数据设置页负责 `app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
 4. 因此 `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次打开系统设置页时，会基于文件中的当前值或运行时默认值初始化数据库记录
 5. 如果你只启动 Web 管理台，`config.yaml` 不再要求保留任务级交易参数；真实交易任务参数以数据库任务配置和启动快照为准
 6. 如果你要直接运行 Bot（`uv run python -m aitrade` / `bash start.sh`），再额外补齐 `app.trade.trade_mode / paper_balance / symbol / timeframe / limit / strategy.*`；其中 `trade_mode` 支持 `live / sandbox / paper`，旧 `sandbox_trade` 仍可兼容映射为 `sandbox / live`
@@ -20,6 +20,7 @@ A simple trading system for AI.
    - `gpt`：保留原有 AI 信号策略
    - `btc_spot_breakout`：BTC 现货 long-only 单周期突破策略
    - `btc_spot_trend_breakout`：BTC 现货趋势突破策略，固定 `1h` 执行并使用 `4h` 趋势过滤
+   - `spot_multi_signal_fusion`：现货多源融合策略，第一阶段综合技术面与成交流信号，优先用于 `paper` 实时模拟验证
 8. 默认会把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`
 
 ## 初始化与运行
@@ -150,6 +151,50 @@ bash stop.sh
 - 回测也会按 `1h` 驱动，并在每根 `1h` K 线决策时仅使用当时已闭合的 `4h` 数据，避免未来数据泄漏
 - 若缺少 `4h` 历史数据，live 校验或回测会直接报错
 
+### 现货多源融合策略
+
+默认策略名：`spot_multi_signal_fusion`
+
+该策略面向现货多源融合场景，当前第一阶段已升级为“结构化融合策略 profile + 可复用信号源档案”的配置模型，并继续复用现有统一 signal 执行链路。
+
+当前融合策略 profile 由以下结构化字段组成：
+
+- `klineNodes`：选择已有 K 线策略档案或内建技术面节点参与融合，并为每个节点维护启用状态、权重、快照参数与固定周期约束
+- `signalSourceNodes`：选择已有信号源档案参与融合，并维护节点权重、是否必需、阈值与参数快照
+- `filters`：维护最少可用节点数、是否允许降级、最低综合置信度、买卖阈值等门槛
+- `riskControls`：维护共享 `ATR` 风控参数与默认单笔风险比例
+- `decisionPolicy`：当前第一阶段固定为 `weighted_score`
+
+第一阶段当前可实际参与运行时融合的节点包括：
+
+- `builtin_technical`：内建技术面节点，基于 `EMA / 突破 / RSI / MACD / 成交量` 综合打分
+- `btc_spot_breakout`：复用 BTC 单周期突破策略的核心判断，作为 K 线融合节点输出倾向
+- `btc_spot_trend_breakout`：复用 `1h + 4h` 趋势突破策略的核心判断，作为 K 线融合节点输出倾向
+- `trade_flow`：基于近期成交的买卖盘占比与名义金额失衡度打分的信号源节点
+
+同时系统已新增独立信号源档案，当前支持：
+
+- `trade_flow`
+- `news`
+- `indicator`
+- `market_activity`
+- `external_signal`
+
+其中只有 `trade_flow` 在第一阶段已接入运行时，其余类型先提供配置落点与详情展示。
+
+当前行为与约束：
+
+- 融合策略列表与详情会展示 `K 线节点数 / 信号源节点数 / 最少可用节点数 / 固定周期约束` 摘要，交易任务页也会展示同类摘要，帮助快速判断是否适合当前任务配置
+- 运行前会把融合策略结构化配置、被引用的 K 线策略档案、被引用的信号源档案以及相关系统默认值一起冻结进 run snapshot，运行中不再回查活跃配置
+- 运行时仍会将结构化快照适配为当前第一阶段执行内核所需的参数，并继续输出 `signal_sources / signal_score / degraded / meta.node_signals` 便于任务日志和交易日志排障
+- 最终止损与追踪止损继续由融合层统一按共享 `ATR` 参数生成，不直接复用子节点独立止损口径
+- 仅支持现货场景，优先用于 `paper` 实时模拟验证
+- 第一阶段尚未接入新闻、情绪、链上或动态数据源的真实运行时消费，也不支持真正 DAG/画布式编排器
+- 当前注册表显式标记 `backtestSupported=false`，不进入正式回测链路
+- 系统设置页中的 `trade_flow` feed 开关、新鲜度和回看成交数只影响后续新启动任务，运行中的实例继续使用启动快照
+- 当 optional feed 缺失或过期时，若策略允许降级运行，会输出 `degraded=true` 而不是直接抛错失败
+- 若所选 K 线节点中包含 `btc_spot_trend_breakout`，交易任务周期当前固定为 `1h`，并会额外装配 `4h` 上下文数据
+
 ### 交易记录持久化
 
 - 默认通过 SQLAlchemy 同步 ORM 把交易执行结果写入 `sqlite:///./.aitrade/trades.sqlite3`
@@ -219,6 +264,7 @@ bash query-trades.sh position
 - `api/users`：用户分页、创建、编辑、重置密码、状态切换
 - `api/trade-logs`：交易日志分页、当前持仓
 - `api/strategies`：策略定义、策略配置列表、保存、删除
+- `api/signal-sources`：信号源定义、信号源配置列表、保存、删除
 - `api/backtests`：历史数据管理、回测任务创建、任务详情与成交明细查询
 - `api/system`：系统设置、系统日志、交易任务状态/启动/停止、任务日志分页查询
 
@@ -248,7 +294,7 @@ bash query-trades.sh position
 
 - `aitrade/__main__.py`：程序入口，负责日志初始化和加载 `config.yaml`
 - `aitrade/trade/trading_system/trading_bot.py`：主循环调度与策略切换入口
-- `aitrade/trade/strategies/`：策略抽象层，包含 GPT 策略和 BTC 现货突破策略
+- `aitrade/trade/strategies/`：策略抽象层，包含 GPT、K 线策略、结构化融合策略，以及融合 profile / signal source 定义注册与兼容归一逻辑
 - `aitrade/trade/trading_system/market_data_fetcher.py`：行情获取与指标整理
 - `aitrade/trade/gpt_signal/`：GPT 信号分析、提示词构建、响应解析
 - `aitrade/trade/trading_system/risk_manager.py`：风控检查与仓位计算

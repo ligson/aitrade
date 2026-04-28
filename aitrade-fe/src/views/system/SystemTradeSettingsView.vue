@@ -41,6 +41,19 @@
             </a-form-item>
           </div>
 
+          <a-divider orientation="left">成交流 feed 默认参数</a-divider>
+          <div class="switch-grid">
+            <a-form-item label="启用成交流 feed">
+              <a-switch v-model:checked="form.tradeFlowFeedEnabled" />
+            </a-form-item>
+            <a-form-item label="feed 新鲜度秒数">
+              <a-input-number v-model:value="form.tradeFlowFeedFreshnessSeconds" :min="1" :step="1" style="width: 100%" />
+            </a-form-item>
+            <a-form-item label="回看成交数">
+              <a-input-number v-model:value="form.tradeFlowFeedLookbackTrades" :min="1" :step="10" style="width: 100%" />
+            </a-form-item>
+          </div>
+
           <a-space>
             <a-button @click="loadForm">重置</a-button>
             <a-button type="primary" :loading="saving" @click="submitForm">保存交易设置</a-button>
@@ -66,6 +79,9 @@ const form = reactive({
   tradeTaskDefaultSlippageRate: 0,
   tradeTaskDefaultDailyLossStopEnabled: false,
   tradeTaskDefaultDailyLossStopThreshold: 100,
+  tradeFlowFeedEnabled: true,
+  tradeFlowFeedFreshnessSeconds: 120,
+  tradeFlowFeedLookbackTrades: 200,
 })
 
 function syncForm() {
@@ -75,6 +91,9 @@ function syncForm() {
   form.tradeTaskDefaultSlippageRate = settings.editable.tradeTaskDefaultSlippageRate
   form.tradeTaskDefaultDailyLossStopEnabled = settings.editable.tradeTaskDefaultDailyLossStopEnabled
   form.tradeTaskDefaultDailyLossStopThreshold = settings.editable.tradeTaskDefaultDailyLossStopThreshold
+  form.tradeFlowFeedEnabled = settings.editable.tradeFlowFeedEnabled
+  form.tradeFlowFeedFreshnessSeconds = settings.editable.tradeFlowFeedFreshnessSeconds
+  form.tradeFlowFeedLookbackTrades = settings.editable.tradeFlowFeedLookbackTrades
 }
 
 async function loadForm() {
@@ -92,6 +111,9 @@ async function submitForm() {
     tradeTaskDefaultSlippageRate: form.tradeTaskDefaultSlippageRate,
     tradeTaskDefaultDailyLossStopEnabled: form.tradeTaskDefaultDailyLossStopEnabled,
     tradeTaskDefaultDailyLossStopThreshold: form.tradeTaskDefaultDailyLossStopThreshold,
+    tradeFlowFeedEnabled: form.tradeFlowFeedEnabled,
+    tradeFlowFeedFreshnessSeconds: form.tradeFlowFeedFreshnessSeconds,
+    tradeFlowFeedLookbackTrades: form.tradeFlowFeedLookbackTrades,
   })
   syncForm()
   message.success('交易设置已保存')
