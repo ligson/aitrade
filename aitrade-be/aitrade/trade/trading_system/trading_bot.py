@@ -8,13 +8,17 @@ from ..strategies import create_strategy
 from .market_data_fetcher import MarketDataFetcher
 from .risk_manager import RiskManager
 from .trade_executor import TradeExecutor
+from .trade_executor import TradingHaltError
 
 
 class TradingBot:
     """主交易机器人控制器。"""
 
-    def __init__(self, config: config_file.Config):
+    def __init__(self, config: config_file.Config, execution_context: dict | None = None):
         self.config = config
+        self.execution_context = execution_context or {}
+
+        market_data_sandbox = config.trade_mode == 'sandbox'
 
         logging.info("初始化市场数据获取器")
         self.market_data_fetcher = MarketDataFetcher(
@@ -22,7 +26,7 @@ class TradingBot:
             api_key=config.exchange_api_key,
             secret=config.exchange_api_secret,
             password=config.exchange_password,
-            sandbox=config.trade_sandbox_trade,
+            sandbox=market_data_sandbox,
             proxies={'http': config.proxy_url, 'https': config.proxy_url} if config.proxy_enable else None,
         )
 
@@ -32,9 +36,11 @@ class TradingBot:
             api_key=config.exchange_api_key,
             secret=config.exchange_api_secret,
             password=config.exchange_password,
-            sandbox=config.trade_sandbox_trade,
+            sandbox=market_data_sandbox,
+            trade_mode=config.trade_mode,
             proxies={'http': config.proxy_url, 'https': config.proxy_url} if config.proxy_enable else None,
             persistence_config=config.trade_persistence_config,
+            paper_balance=config.trade_paper_balance,
         )
 
         logging.info("初始化风险管理器")
@@ -42,6 +48,7 @@ class TradingBot:
 
         logging.info("初始化交易策略")
         self.strategy = create_strategy(config)
+        self.market_data_requirements = self.strategy.get_market_data_requirements()
         self.required_history = max(config.trade_limit, self.strategy.get_required_history())
 
         if config.trade_persistence_config.get('restore_position_on_startup'):
@@ -52,27 +59,27 @@ class TradingBot:
                 logging.info("未恢复到本地持仓状态，交易对: %s", config.trade_symbol)
 
         logging.info(
-            "交易机器人初始化完成 - 交易所类型: %s, 代理是否启用: %s, 代理地址: %s, 策略: %s, K线数量: %s",
+            "交易机器人初始化完成 - 交易所类型: %s, trade_mode=%s, 代理是否启用: %s, 代理地址: %s, 策略: %s, K线数量: %s, 数据需求: %s",
             config.exchange_type,
+            config.trade_mode,
             config.proxy_enable,
             config.proxy_url,
             config.trade_strategy_type,
             self.required_history,
+            self.market_data_requirements,
         )
 
     def close(self) -> None:
         self.trade_executor.close()
 
     def get_cycle_interval_seconds(self) -> int:
-        return self.config.trade_timeframe * 60
+        timeframe = self.market_data_requirements.get('primary_timeframe') or (str(self.config.trade_timeframe) + 'm')
+        return self._timeframe_to_seconds(timeframe)
 
     def run_cycle(self) -> None:
         logging.info("开始新的交易周期")
-        data = self.market_data_fetcher.get_enhanced_market_data(
-            symbol=self.config.trade_symbol,
-            timeframe=str(self.config.trade_timeframe) + 'm',
-            limit=self.required_history,
-        )
+        self.trade_executor.check_daily_loss_stop(self.execution_context.get('run_id'))
+        data = self._load_market_data()
         logging.debug("获取到市场数据: %s 价格: %s", data['symbol'], data['price'])
 
         position = self.trade_executor.get_position()
@@ -97,6 +104,8 @@ class TradingBot:
                 data,
                 self.risk_manager,
                 trigger_source='strategy_signal',
+                run_id=self.execution_context.get('run_id'),
+                trade_task_profile_id=self.execution_context.get('trade_task_profile_id'),
             )
         else:
             logging.info("当前信号不建议交易")
@@ -105,6 +114,81 @@ class TradingBot:
         if position and position.get('stop_loss') is not None and data['price'] <= position['stop_loss']:
             logging.warning("触发止损条件! 当前价格: %s, 止损价格: %s", data['price'], position['stop_loss'])
             self._execute_stop_loss(position, data)
+
+    def _load_market_data(self) -> dict:
+        primary_timeframe = self.market_data_requirements.get('primary_timeframe') or (str(self.config.trade_timeframe) + 'm')
+        primary_data = self.market_data_fetcher.get_enhanced_market_data(
+            symbol=self.config.trade_symbol,
+            timeframe=primary_timeframe,
+            limit=self.required_history,
+        )
+        context_timeframes = list(self.market_data_requirements.get('context_timeframes') or [])
+        if not context_timeframes:
+            return primary_data
+
+        contexts = {}
+        context_history_getter = getattr(self.strategy, 'get_required_context_history', None)
+        context_histories = context_history_getter() if callable(context_history_getter) else {}
+        decision_ts = primary_data['timestamps'][-1]
+        for timeframe in context_timeframes:
+            context_limit = max(int(context_histories.get(timeframe, self.required_history)), 10)
+            context_data = self.market_data_fetcher.get_enhanced_market_data(
+                symbol=self.config.trade_symbol,
+                timeframe=timeframe,
+                limit=context_limit,
+            )
+            contexts[timeframe] = self._trim_context_market_data(context_data, decision_ts)
+
+        merged_data = dict(primary_data)
+        merged_data['primary'] = primary_data
+        merged_data['contexts'] = contexts
+        merged_data['decisionTimestamp'] = decision_ts
+        return merged_data
+
+    @staticmethod
+    def _trim_context_market_data(context_data: dict, decision_ts: int) -> dict:
+        valid_indexes = [index for index, timestamp in enumerate(context_data.get('timestamps', [])) if timestamp <= decision_ts]
+        if not valid_indexes:
+            return {
+                'symbol': context_data.get('symbol'),
+                'timestamp': context_data.get('timestamp'),
+                'price': context_data.get('price'),
+                'timestamps': [],
+                'opens': [],
+                'highs': [],
+                'lows': [],
+                'closes': [],
+                'volumes': [],
+                'ohlcv': [],
+                'technicals': {},
+            }
+        last_index = valid_indexes[-1] + 1
+        closes = context_data.get('closes', [])[:last_index]
+        trimmed = {
+            'symbol': context_data.get('symbol'),
+            'timestamp': context_data.get('timestamp'),
+            'price': closes[-1] if closes else context_data.get('price'),
+            'timestamps': context_data.get('timestamps', [])[:last_index],
+            'opens': context_data.get('opens', [])[:last_index],
+            'highs': context_data.get('highs', [])[:last_index],
+            'lows': context_data.get('lows', [])[:last_index],
+            'closes': closes,
+            'volumes': context_data.get('volumes', [])[:last_index],
+            'ohlcv': context_data.get('ohlcv', [])[:last_index],
+        }
+        trimmed['technicals'] = {}
+        return trimmed
+
+    @staticmethod
+    def _timeframe_to_seconds(timeframe: str) -> int:
+        normalized = str(timeframe or '').strip().lower()
+        if normalized.endswith('m') and normalized[:-1].isdigit():
+            return int(normalized[:-1]) * 60
+        if normalized.endswith('h') and normalized[:-1].isdigit():
+            return int(normalized[:-1]) * 3600
+        if normalized.endswith('d') and normalized[:-1].isdigit():
+            return int(normalized[:-1]) * 86400
+        raise ValueError(f'不支持的周期格式: {timeframe}')
 
     def run(self, stop_event: Event | None = None) -> None:
         logging.info("启动交易机器人主循环...")
@@ -118,6 +202,8 @@ class TradingBot:
                 if effective_stop_event.wait(sleep_time):
                     logging.info("收到停止信号，交易机器人准备退出")
                     break
+            except TradingHaltError:
+                raise
             except Exception as e:
                 logging.exception("主循环发生错误: %s", e)
                 logging.info("等待60秒后重试...")
@@ -149,7 +235,11 @@ class TradingBot:
                 market_data,
                 self.risk_manager,
                 trigger_source='stop_loss_trigger',
+                run_id=self.execution_context.get('run_id'),
+                trade_task_profile_id=self.execution_context.get('trade_task_profile_id'),
             )
             logging.info("止损操作执行完成")
+        except TradingHaltError:
+            raise
         except Exception as e:
             logging.exception("止损执行失败: %s", e)

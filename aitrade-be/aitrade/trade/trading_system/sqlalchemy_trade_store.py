@@ -1,10 +1,13 @@
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy import desc
 from sqlalchemy import func
+from sqlalchemy import inspect
 from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from ...db import Base
@@ -22,6 +25,7 @@ class SQLAlchemyTradeStore:
         self.engine = get_engine(database_url)
         self.Session = get_session_factory(database_url)
         Base.metadata.create_all(self.engine)
+        self._ensure_trade_records_schema()
 
     def close(self) -> None:
         return None
@@ -29,6 +33,8 @@ class SQLAlchemyTradeStore:
     def insert_trade_record(self, record: Dict[str, Any]) -> int:
         payload = {
             'created_at': record.get('created_at') or self._utc_now(),
+            'run_id': record.get('run_id'),
+            'trade_task_profile_id': record.get('trade_task_profile_id'),
             'symbol': record.get('symbol'),
             'strategy': record.get('strategy', 'unknown'),
             'trigger_source': record.get('trigger_source', 'strategy_signal'),
@@ -42,6 +48,7 @@ class SQLAlchemyTradeStore:
             'risk_per_trade': record.get('risk_per_trade'),
             'exchange_type': record.get('exchange_type', 'unknown'),
             'sandbox': bool(record.get('sandbox')),
+            'trade_mode': record.get('trade_mode', 'sandbox' if record.get('sandbox') else 'live'),
             'result': record.get('result', 'unknown'),
             'result_reason': record.get('result_reason'),
             'order_id': record.get('order_id'),
@@ -50,7 +57,14 @@ class SQLAlchemyTradeStore:
             'order_price': record.get('order_price'),
             'order_amount': record.get('order_amount'),
             'order_cost': record.get('order_cost'),
+            'fee_rate': record.get('fee_rate'),
+            'slippage_rate': record.get('slippage_rate'),
+            'estimated_fill_price': record.get('estimated_fill_price'),
+            'estimated_fee': record.get('estimated_fee'),
+            'realized_pnl': record.get('realized_pnl'),
+            'realized_pnl_net': record.get('realized_pnl_net'),
             'error_message': record.get('error_message'),
+            'daily_loss_snapshot_json': self._json_text(record.get('daily_loss_snapshot')),
             'signal_meta_json': self._json_text(record.get('signal_meta')),
             'risk_snapshot_json': self._json_text(record.get('risk_snapshot')),
             'position_before_json': self._json_text(record.get('position_before')),
@@ -107,11 +121,12 @@ class SQLAlchemyTradeStore:
         results: Optional[Sequence[str]] = None,
         offset: int = 0,
         symbol: Optional[str] = None,
+        run_id: Optional[int] = None,
         created_from: Optional[str] = None,
         created_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         stmt = select(TradeRecordModel)
-        stmt = self._apply_trade_filters(stmt, strategy, side, result, results, symbol, created_from, created_to)
+        stmt = self._apply_trade_filters(stmt, strategy, side, result, results, symbol, run_id, created_from, created_to)
         stmt = stmt.order_by(desc(TradeRecordModel.created_at)).offset(offset).limit(limit)
         with self.Session() as session:
             models = session.execute(stmt).scalars().all()
@@ -124,11 +139,12 @@ class SQLAlchemyTradeStore:
         result: Optional[str] = None,
         results: Optional[Sequence[str]] = None,
         symbol: Optional[str] = None,
+        run_id: Optional[int] = None,
         created_from: Optional[str] = None,
         created_to: Optional[str] = None,
     ) -> int:
         stmt = select(func.count()).select_from(TradeRecordModel)
-        stmt = self._apply_trade_filters(stmt, strategy, side, result, results, symbol, created_from, created_to)
+        stmt = self._apply_trade_filters(stmt, strategy, side, result, results, symbol, run_id, created_from, created_to)
         with self.Session() as session:
             return int(session.execute(stmt).scalar_one())
 
@@ -137,6 +153,38 @@ class SQLAlchemyTradeStore:
         with self.Session() as session:
             models = session.execute(stmt).scalars().all()
             return [self._position_state_to_dict(model) for model in models]
+
+    def get_daily_loss_summary(self, run_id: int, created_from: str, created_to: str) -> Dict[str, Any]:
+        stmt = (
+            select(
+                func.coalesce(func.sum(TradeRecordModel.realized_pnl_net), 0.0),
+                func.coalesce(
+                    func.sum(
+                        func.case(
+                            (TradeRecordModel.realized_pnl_net < 0, -TradeRecordModel.realized_pnl_net),
+                            else_=0.0,
+                        )
+                    ),
+                    0.0,
+                ),
+                func.count(),
+            )
+            .where(TradeRecordModel.run_id == run_id)
+            .where(TradeRecordModel.result == 'executed')
+            .where(TradeRecordModel.side == 'sell')
+            .where(TradeRecordModel.created_at >= created_from)
+            .where(TradeRecordModel.created_at < created_to)
+        )
+        with self.Session() as session:
+            realized_pnl_net, realized_loss, trade_count = session.execute(stmt).one()
+            return {
+                'runId': run_id,
+                'createdFrom': created_from,
+                'createdTo': created_to,
+                'realizedPnlNet': float(realized_pnl_net or 0.0),
+                'realizedLoss': float(realized_loss or 0.0),
+                'tradeCount': int(trade_count or 0),
+            }
 
     def list_trade_symbols(self) -> List[str]:
         stmt = (
@@ -151,7 +199,7 @@ class SQLAlchemyTradeStore:
             return [item.strip() for item in rows if isinstance(item, str) and item.strip()]
 
     @staticmethod
-    def _apply_trade_filters(stmt, strategy, side, result, results, symbol, created_from, created_to):
+    def _apply_trade_filters(stmt, strategy, side, result, results, symbol, run_id, created_from, created_to):
         if strategy:
             stmt = stmt.where(TradeRecordModel.strategy == strategy)
         if side:
@@ -162,6 +210,8 @@ class SQLAlchemyTradeStore:
             stmt = stmt.where(TradeRecordModel.result.in_(list(results)))
         if symbol:
             stmt = stmt.where(TradeRecordModel.symbol == symbol)
+        if run_id is not None:
+            stmt = stmt.where(TradeRecordModel.run_id == run_id)
         if created_from:
             stmt = stmt.where(TradeRecordModel.created_at >= created_from)
         if created_to:
@@ -172,6 +222,8 @@ class SQLAlchemyTradeStore:
         return {
             'id': model.id,
             'created_at': model.created_at,
+            'run_id': model.run_id,
+            'trade_task_profile_id': model.trade_task_profile_id,
             'symbol': model.symbol,
             'strategy': model.strategy,
             'trigger_source': model.trigger_source,
@@ -185,6 +237,7 @@ class SQLAlchemyTradeStore:
             'risk_per_trade': model.risk_per_trade,
             'exchange_type': model.exchange_type,
             'sandbox': bool(model.sandbox),
+            'trade_mode': model.trade_mode or ('sandbox' if model.sandbox else 'live'),
             'result': model.result,
             'result_reason': model.result_reason,
             'order_id': model.order_id,
@@ -193,7 +246,14 @@ class SQLAlchemyTradeStore:
             'order_price': model.order_price,
             'order_amount': model.order_amount,
             'order_cost': model.order_cost,
+            'fee_rate': model.fee_rate,
+            'slippage_rate': model.slippage_rate,
+            'estimated_fill_price': model.estimated_fill_price,
+            'estimated_fee': model.estimated_fee,
+            'realized_pnl': model.realized_pnl,
+            'realized_pnl_net': model.realized_pnl_net,
             'error_message': model.error_message,
+            'daily_loss_snapshot': self._json_value(model.daily_loss_snapshot_json),
             'signal_meta': self._json_value(model.signal_meta_json, {}),
             'risk_snapshot': self._json_value(model.risk_snapshot_json, {}),
             'position_before': self._json_value(model.position_before_json),
@@ -229,6 +289,41 @@ class SQLAlchemyTradeStore:
         if value is None:
             return default
         return json.loads(value)
+
+    def _ensure_trade_records_schema(self) -> None:
+        inspector = inspect(self.engine)
+        if 'trade_records' not in inspector.get_table_names():
+            return
+        columns = {column['name'] for column in inspector.get_columns('trade_records')}
+        column_definitions = {
+            'run_id': 'INTEGER',
+            'trade_task_profile_id': 'INTEGER',
+            'trade_mode': "VARCHAR DEFAULT 'sandbox'",
+            'fee_rate': 'FLOAT',
+            'slippage_rate': 'FLOAT',
+            'estimated_fill_price': 'FLOAT',
+            'estimated_fee': 'FLOAT',
+            'realized_pnl': 'FLOAT',
+            'realized_pnl_net': 'FLOAT',
+            'daily_loss_snapshot_json': 'TEXT',
+        }
+        missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
+        with self.engine.begin() as connection:
+            if missing_columns:
+                logging.info('检测到 trade_records 缺少历史字段，自动补列: columns=%s', list(missing_columns.keys()))
+                for name, ddl in missing_columns.items():
+                    connection.execute(text(f'ALTER TABLE trade_records ADD COLUMN {name} {ddl}'))
+
+            existing_indexes = {index['name'] for index in inspector.get_indexes('trade_records')}
+            index_statements = {
+                'idx_trade_records_run_created_at': 'CREATE INDEX idx_trade_records_run_created_at ON trade_records (run_id, created_at)',
+                'idx_trade_records_profile_created_at': 'CREATE INDEX idx_trade_records_profile_created_at ON trade_records (trade_task_profile_id, created_at)',
+            }
+            missing_indexes = {name: ddl for name, ddl in index_statements.items() if name not in existing_indexes}
+            if missing_indexes:
+                logging.info('检测到 trade_records 缺少历史索引，自动补齐: indexes=%s', list(missing_indexes.keys()))
+                for ddl in missing_indexes.values():
+                    connection.execute(text(ddl))
 
     @staticmethod
     def _utc_now() -> str:

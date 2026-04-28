@@ -17,7 +17,7 @@
                   {{ item.name }}
                 </a-select-option>
               </a-select>
-              <a-popconfirm title="确认按当前所选页面配置启动交易任务吗？" ok-text="启动" cancel-text="取消" @confirm="handleStartTradeTask">
+              <a-popconfirm :title="startConfirmTitle" ok-text="启动" cancel-text="取消" @confirm="handleStartTradeTask">
                 <a-button type="primary" :loading="startLoading" :disabled="!tradeTask.canStart || !selectedProfileId">开始运行</a-button>
               </a-popconfirm>
               <a-popconfirm title="确认停止当前交易任务吗？" ok-text="停止" cancel-text="取消" @confirm="handleStopTradeTask">
@@ -26,6 +26,7 @@
               <a-button :loading="tradeTaskLoading" @click="reloadAll">刷新状态</a-button>
               <a-button @click="goToProfiles">返回配置页</a-button>
               <a-button @click="goToTaskLogs">查看任务日志</a-button>
+              <a-button :disabled="!tradeTask.runId" @click="goToTradeLogs">查看本次运行交易日志</a-button>
             </a-space>
             <div class="action-tip">任务级参数由页面配置和数据库快照驱动；系统级密钥、代理和持久化配置仍来自后端 config.yaml。</div>
           </div>
@@ -78,8 +79,12 @@
               <a-descriptions-item label="策略配置 ID">{{ tradeTask.currentRun.strategyProfileId ?? '-' }}</a-descriptions-item>
               <a-descriptions-item label="交易对">{{ tradeTask.currentRun.symbol }}</a-descriptions-item>
               <a-descriptions-item label="周期">{{ tradeTask.currentRun.timeframe }}</a-descriptions-item>
-              <a-descriptions-item label="模式">{{ tradeTask.currentRun.sandboxTrade ? '沙盒' : '实盘' }}</a-descriptions-item>
+              <a-descriptions-item label="模式">{{ tradeModeLabel(resolveTradeMode(tradeTask.currentRun)) }}</a-descriptions-item>
               <a-descriptions-item label="K线数量">{{ tradeTask.currentRun.tradeLimit }}</a-descriptions-item>
+              <a-descriptions-item label="手续费率">{{ formatRate(tradeTask.currentRun.feeRate) }}</a-descriptions-item>
+              <a-descriptions-item label="滑点率">{{ formatRate(tradeTask.currentRun.slippageRate) }}</a-descriptions-item>
+              <a-descriptions-item label="单日亏损停机">{{ tradeTask.currentRun.dailyLossStopEnabled ? '已启用' : '关闭' }}</a-descriptions-item>
+              <a-descriptions-item label="单日亏损阈值">{{ formatNumber(tradeTask.currentRun.dailyLossStopThreshold) }}</a-descriptions-item>
               <a-descriptions-item label="策略类型">{{ strategyTypeLabel(tradeTask.currentRun.strategyType) }}</a-descriptions-item>
               <a-descriptions-item label="创建人">{{ tradeTask.currentRun.createdBy }}</a-descriptions-item>
             </a-descriptions>
@@ -101,7 +106,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { fetchStrategyProfiles } from '@/api/strategies'
 import { fetchTradeTaskProfiles, fetchTradeTaskStatus, startTradeTask, stopTradeTask } from '@/api/system'
 import type { StrategyProfile } from '@/types/strategy'
-import type { TradeTaskProfile, TradeTaskStatus } from '@/types/system'
+import type { TradeMode, TradeTaskProfile, TradeTaskStatus } from '@/types/system'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,6 +147,18 @@ const tradeTask = reactive<TradeTaskStatus>({
 
 const activeStatuses = new Set(['starting', 'running', 'stop_requested'])
 const enabledProfiles = computed(() => profiles.value.filter((item) => item.enabled))
+const selectedProfile = computed(() => enabledProfiles.value.find((item) => item.id === selectedProfileId.value) || null)
+const startConfirmTitle = computed(() => {
+  const tradeMode = resolveTradeMode(selectedProfile.value)
+  const modeLabel = tradeModeLabel(tradeMode)
+  if (tradeMode === 'live') {
+    return `确认启动“${selectedProfile.value?.name || '当前配置'}”吗？当前为${modeLabel}，会使用真实行情并真实下单。`
+  }
+  if (tradeMode === 'paper') {
+    return `确认启动“${selectedProfile.value?.name || '当前配置'}”吗？当前为${modeLabel}，会使用真实行情但不会真实下单。`
+  }
+  return `确认启动“${selectedProfile.value?.name || '当前配置'}”吗？当前为${modeLabel}，会使用沙盒行情并在沙盒环境下单。`
+})
 
 function filterSelectOption(input: string, option?: { children?: unknown; value?: unknown }) {
   const label = typeof option?.children === 'string' ? option.children : String(option?.value || '')
@@ -154,6 +171,20 @@ function formatDateTime(value: string | null | undefined) {
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : value
+}
+
+function formatNumber(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 8 })
+}
+
+function formatRate(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return `${(Number(value) * 100).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}%`
 }
 
 function statusLabel(value: string) {
@@ -201,12 +232,39 @@ function strategyTypeLabel(value: string) {
   return strategyProfiles.value.find((item) => item.strategyType === value)?.definition?.displayName || value || '-'
 }
 
+function resolveTradeMode(payload: Pick<TradeTaskProfile, 'tradeMode' | 'sandboxTrade'> | Pick<NonNullable<TradeTaskStatus['currentRun']>, 'tradeMode' | 'sandboxTrade'> | null | undefined): TradeMode {
+  if (payload?.tradeMode) {
+    return payload.tradeMode
+  }
+  return payload?.sandboxTrade === false ? 'live' : 'sandbox'
+}
+
+function tradeModeLabel(value: TradeMode) {
+  if (value === 'live') {
+    return '真实交易'
+  }
+  if (value === 'sandbox') {
+    return '沙盒交易'
+  }
+  if (value === 'paper') {
+    return '纸上交易'
+  }
+  return value || '-'
+}
+
 function goToProfiles() {
   router.push('/trade-task-profiles')
 }
 
 function goToTaskLogs() {
   router.push('/trade-task-logs')
+}
+
+function goToTradeLogs() {
+  if (!tradeTask.runId) {
+    return
+  }
+  router.push({ path: '/trade-logs', query: { runId: String(tradeTask.runId) } })
 }
 
 function ensurePolling() {

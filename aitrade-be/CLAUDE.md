@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-`aitrade` 是一个小型 Python 自动交易机器人，当前支持两类可配置策略：
+`aitrade` 是一个小型 Python 自动交易机器人，当前支持三类可配置策略：
 - `gpt`：通过兼容 OpenAI 的客户端生成 AI 交易信号
-- `btc_spot_breakout`：面向 BTC 现货的 long-only 规则突破策略
+- `btc_spot_breakout`：面向 BTC 现货的 long-only 单周期规则突破策略
+- `btc_spot_trend_breakout`：面向 BTC 现货的 long-only 趋势突破策略，固定 `1h` 执行并使用 `4h` 趋势过滤
 
 当前文件所在目录 `aitrade-be/` 是后端项目根目录。
 
@@ -135,6 +136,14 @@ app:
       type: btc_spot_breakout
 ```
 
+```yaml
+app:
+  trade:
+    timeframe: 1h
+    strategy:
+      type: btc_spot_trend_breakout
+```
+
 新环境初始化时，以精简后的 `config.example.yaml` 作为 Web 场景配置结构的权威示例；如需直跑 Bot，再按文档补齐任务级字段。
 
 额外的持久化约定：
@@ -165,9 +174,10 @@ app:
 ### 策略层
 
 `aitrade/trade/strategies/` 是新增的策略抽象层：
-- `base_strategy.py`：统一策略接口
+- `base_strategy.py`：统一策略接口，并声明策略所需的主周期 / 上下文周期数据规格
 - `gpt_strategy.py`：对原有 GPT 信号链路的包装
 - `btc_spot_breakout_strategy.py`：BTC 现货突破策略
+- `btc_spot_trend_breakout_strategy.py`：BTC 现货趋势突破策略
 - `factory.py`：根据配置创建策略实例
 
 `GPTStrategy` 自身负责最小置信度阈值，不再由 `TradingBot` 写死全局 `0.7`。
@@ -204,6 +214,8 @@ app:
 - 后台运行态保存在 `.aitrade/`；主应用日志、交易日志和启动辅助日志保存在 `logs/`。
 - 当前缺少测试，验证方式以手工和定向检查为主。
 - 15 分钟 BTC 突破策略已做过滤，但仍可能受噪音影响，优先建议沙盒联调。
+- `btc_spot_trend_breakout` 当前固定使用 `1h` 执行周期和 `4h` 趋势过滤；不要在页面或实现里把它放宽为任意周期组合。
+- 如果修改 live / backtest 的多周期装配逻辑，必须确保 `4h` 上下文数据在任一 `1h` 决策点都只使用当时已闭合的 K 线，避免未来数据泄漏。
 - 修改脚本或文档时，要确保命令与仓库里实际存在的脚本和入口保持一致。
 - 修改 `*.sh` 脚本时，默认要同时兼容 macOS 与 Linux；优先使用两边都支持的命令、选项和路径处理方式，不要依赖 GNU 独有参数。
 - **网络错误日志清晰**：代码中涉及网络调用（交易所连接、API 请求等）的地方，如遇连接失败、超时等网络问题，日志输出必须清晰明确，包含具体的错误信息、失败位置和上下文，便于问题排查。

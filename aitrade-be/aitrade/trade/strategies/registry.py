@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...config.config_file import DEFAULT_BTC_SPOT_BREAKOUT_CONFIG
+from ...config.config_file import DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG
 from ...config.config_file import DEFAULT_GPT_STRATEGY_CONFIG
 
 
@@ -46,6 +47,27 @@ _STRATEGY_DEFINITIONS: list[dict[str, Any]] = [
             {'field': 'confirm_volume', 'label': '启用成交量确认', 'type': 'boolean', 'required': True},
             {'field': 'volume_ma_period', 'label': '成交量均线周期', 'type': 'integer', 'required': True, 'min': 1},
             {'field': 'volume_multiplier', 'label': '成交量放大倍数', 'type': 'number', 'required': True, 'min': 0.01, 'step': 0.01},
+            {'field': 'default_risk_per_trade', 'label': '单笔风险比例', 'type': 'number', 'required': True, 'min': 0.0001, 'max': 1, 'step': 0.0001},
+        ],
+        'schemaVersion': 1,
+    },
+    {
+        'strategyType': 'btc_spot_trend_breakout',
+        'displayName': 'BTC 现货趋势突破策略',
+        'description': '基于 4h EMA/ADX 趋势过滤与 1h 突破放量入场的 BTC 现货 long-only 规则策略。',
+        'backtestSupported': True,
+        'defaultParams': dict(DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG),
+        'paramSchema': [
+            {'field': 'ema_fast_period', 'label': '趋势快 EMA 周期', 'type': 'integer', 'required': True, 'min': 1},
+            {'field': 'ema_slow_period', 'label': '趋势慢 EMA 周期', 'type': 'integer', 'required': True, 'min': 2},
+            {'field': 'adx_period', 'label': 'ADX 周期', 'type': 'integer', 'required': True, 'min': 1},
+            {'field': 'adx_threshold', 'label': 'ADX 阈值', 'type': 'number', 'required': True, 'min': 0.01, 'step': 0.01},
+            {'field': 'breakout_lookback', 'label': '突破窗口', 'type': 'integer', 'required': True, 'min': 1},
+            {'field': 'volume_ma_period', 'label': '成交量均线周期', 'type': 'integer', 'required': True, 'min': 1},
+            {'field': 'volume_multiplier', 'label': '成交量放大倍数', 'type': 'number', 'required': True, 'min': 0.01, 'step': 0.01},
+            {'field': 'atr_period', 'label': 'ATR 周期', 'type': 'integer', 'required': True, 'min': 1},
+            {'field': 'atr_stop_mult', 'label': '初始止损 ATR 倍数', 'type': 'number', 'required': True, 'min': 0.01, 'step': 0.01},
+            {'field': 'atr_trail_mult', 'label': '追踪止损 ATR 倍数', 'type': 'number', 'required': True, 'min': 0.01, 'step': 0.01},
             {'field': 'default_risk_per_trade', 'label': '单笔风险比例', 'type': 'number', 'required': True, 'min': 0.0001, 'max': 1, 'step': 0.0001},
         ],
         'schemaVersion': 1,

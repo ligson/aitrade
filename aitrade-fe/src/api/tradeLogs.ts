@@ -9,6 +9,7 @@ export function pageTradeLogs(payload: {
   side?: string
   result?: string
   symbol?: string
+  runId?: number
   createdFrom?: string
   createdTo?: string
 }) {

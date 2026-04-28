@@ -34,6 +34,7 @@ class SQLiteTradeStore:
             'risk_per_trade': record.get('risk_per_trade'),
             'exchange_type': record.get('exchange_type', 'unknown'),
             'sandbox': 1 if record.get('sandbox') else 0,
+            'trade_mode': record.get('trade_mode', 'sandbox' if record.get('sandbox') else 'live'),
             'result': record.get('result', 'unknown'),
             'result_reason': record.get('result_reason'),
             'order_id': record.get('order_id'),
@@ -197,6 +198,7 @@ class SQLiteTradeStore:
                 risk_per_trade REAL,
                 exchange_type TEXT NOT NULL,
                 sandbox INTEGER NOT NULL,
+                trade_mode TEXT NOT NULL DEFAULT 'sandbox',
                 result TEXT NOT NULL,
                 result_reason TEXT,
                 order_id TEXT,
@@ -235,6 +237,9 @@ class SQLiteTradeStore:
             );
             '''
         )
+        columns = {row['name'] for row in self.conn.execute('PRAGMA table_info(trade_records)').fetchall()}
+        if 'trade_mode' not in columns:
+            self.conn.execute("ALTER TABLE trade_records ADD COLUMN trade_mode TEXT NOT NULL DEFAULT 'sandbox'")
         self.conn.commit()
 
     def _row_to_trade_record(self, row: sqlite3.Row) -> Dict[str, Any]:
@@ -254,6 +259,7 @@ class SQLiteTradeStore:
             'risk_per_trade': row['risk_per_trade'],
             'exchange_type': row['exchange_type'],
             'sandbox': bool(row['sandbox']),
+            'trade_mode': row['trade_mode'] or ('sandbox' if row['sandbox'] else 'live'),
             'result': row['result'],
             'result_reason': row['result_reason'],
             'order_id': row['order_id'],

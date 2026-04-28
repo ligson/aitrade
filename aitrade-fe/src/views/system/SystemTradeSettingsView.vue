@@ -19,6 +19,28 @@
             </a-form-item>
           </div>
 
+          <a-divider orientation="left">交易任务默认参数</a-divider>
+          <div class="switch-grid">
+            <a-form-item label="默认手续费率">
+              <a-input-number v-model:value="form.tradeTaskDefaultFeeRate" :min="0" :step="0.0001" style="width: 100%" />
+            </a-form-item>
+            <a-form-item label="默认滑点率">
+              <a-input-number v-model:value="form.tradeTaskDefaultSlippageRate" :min="0" :step="0.0001" style="width: 100%" />
+            </a-form-item>
+            <a-form-item label="默认启用单日亏损停机">
+              <a-switch v-model:checked="form.tradeTaskDefaultDailyLossStopEnabled" />
+            </a-form-item>
+            <a-form-item label="默认单日亏损停机阈值">
+              <a-input-number
+                v-model:value="form.tradeTaskDefaultDailyLossStopThreshold"
+                :min="0"
+                :step="1"
+                :disabled="!form.tradeTaskDefaultDailyLossStopEnabled"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </div>
+
           <a-space>
             <a-button @click="loadForm">重置</a-button>
             <a-button type="primary" :loading="saving" @click="submitForm">保存交易设置</a-button>
@@ -40,11 +62,19 @@ const { loading, saving, settings, loadSettings, saveEditable } = useSystemSetti
 const form = reactive({
   persistPosition: true,
   restorePositionOnStartup: false,
+  tradeTaskDefaultFeeRate: 0,
+  tradeTaskDefaultSlippageRate: 0,
+  tradeTaskDefaultDailyLossStopEnabled: false,
+  tradeTaskDefaultDailyLossStopThreshold: 100,
 })
 
 function syncForm() {
   form.persistPosition = settings.editable.persistPosition
   form.restorePositionOnStartup = settings.editable.restorePositionOnStartup
+  form.tradeTaskDefaultFeeRate = settings.editable.tradeTaskDefaultFeeRate
+  form.tradeTaskDefaultSlippageRate = settings.editable.tradeTaskDefaultSlippageRate
+  form.tradeTaskDefaultDailyLossStopEnabled = settings.editable.tradeTaskDefaultDailyLossStopEnabled
+  form.tradeTaskDefaultDailyLossStopThreshold = settings.editable.tradeTaskDefaultDailyLossStopThreshold
 }
 
 async function loadForm() {
@@ -58,6 +88,10 @@ async function submitForm() {
     ...settings.editable,
     persistPosition: form.persistPosition,
     restorePositionOnStartup: form.restorePositionOnStartup,
+    tradeTaskDefaultFeeRate: form.tradeTaskDefaultFeeRate,
+    tradeTaskDefaultSlippageRate: form.tradeTaskDefaultSlippageRate,
+    tradeTaskDefaultDailyLossStopEnabled: form.tradeTaskDefaultDailyLossStopEnabled,
+    tradeTaskDefaultDailyLossStopThreshold: form.tradeTaskDefaultDailyLossStopThreshold,
   })
   syncForm()
   message.success('交易设置已保存')

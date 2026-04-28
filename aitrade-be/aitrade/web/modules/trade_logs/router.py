@@ -20,6 +20,7 @@ class TradeLogPageRequest(BaseModel):
     side: str | None = None
     result: str | None = None
     symbol: str | None = None
+    runId: int | None = None
     createdFrom: str | None = None
     createdTo: str | None = None
 
@@ -36,6 +37,7 @@ def page_trade_logs(
         side=payload.side,
         result=payload.result,
         symbol=payload.symbol,
+        run_id=payload.runId,
         created_from=payload.createdFrom,
         created_to=payload.createdTo,
     )
@@ -46,6 +48,7 @@ def page_trade_logs(
         side=payload.side,
         result=payload.result,
         symbol=payload.symbol,
+        run_id=payload.runId,
         created_from=payload.createdFrom,
         created_to=payload.createdTo,
     )

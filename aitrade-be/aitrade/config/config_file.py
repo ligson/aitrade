@@ -27,12 +27,38 @@ DEFAULT_BTC_SPOT_BREAKOUT_CONFIG = {
     'default_risk_per_trade': 0.01,
 }
 
+DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG = {
+    'ema_fast_period': 20,
+    'ema_slow_period': 50,
+    'adx_period': 14,
+    'adx_threshold': 25,
+    'breakout_lookback': 20,
+    'volume_ma_period': 20,
+    'volume_multiplier': 1.0,
+    'atr_period': 14,
+    'atr_stop_mult': 2.0,
+    'atr_trail_mult': 3.0,
+    'default_risk_per_trade': 0.01,
+}
+
 DEFAULT_TRADE_PERSISTENCE_CONFIG = {
     'enabled': True,
     'database_url': 'sqlite:///./.aitrade/trades.sqlite3',
     'persist_position': True,
     'restore_position_on_startup': False,
 }
+
+DEFAULT_TRADE_TASK_DEFAULTS_CONFIG = {
+    'fee_rate': 0.0,
+    'slippage_rate': 0.0,
+    'daily_loss_stop_enabled': False,
+    'daily_loss_stop_threshold': 100.0,
+}
+
+DEFAULT_TRADE_EXECUTION_CONFIG = dict(DEFAULT_TRADE_TASK_DEFAULTS_CONFIG)
+
+TRADE_MODES = {'live', 'sandbox', 'paper'}
+DEFAULT_PAPER_BALANCE = 10000.0
 
 DEFAULT_WEB_INIT_ADMIN_CONFIG = {
     'enabled': True,
@@ -127,6 +153,12 @@ def _require_positive_number(value, path):
     return value
 
 
+def _require_non_negative_number(value, path):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise ConfigValidationError(f"配置项 {path} 必须是大于等于 0 的数字")
+    return value
+
+
 def _require_string_list(value, path):
     if not isinstance(value, list):
         raise ConfigValidationError(f"配置项 {path} 必须是字符串数组")
@@ -136,6 +168,19 @@ def _require_string_list(value, path):
             raise ConfigValidationError(f"配置项 {path}[{index}] 必须是非空字符串")
         items.append(item.strip())
     return items
+
+
+def _normalize_trade_mode(trade_cfg, path_prefix='app.trade'):
+    trade_mode = trade_cfg.get('trade_mode')
+    if trade_mode is not None:
+        normalized = _require_non_empty_string(trade_mode, f'{path_prefix}.trade_mode').lower()
+        if normalized not in TRADE_MODES:
+            raise ConfigValidationError('配置项 app.trade.trade_mode 只支持 live、sandbox 或 paper')
+        return normalized
+
+    sandbox_trade = _require_bool(trade_cfg.get('sandbox_trade', True), f'{path_prefix}.sandbox_trade')
+    logging.info('未显式提供 app.trade.trade_mode，继续兼容使用 sandbox_trade=%s', sandbox_trade)
+    return 'sandbox' if sandbox_trade else 'live'
 
 
 class Config:
@@ -219,18 +264,31 @@ class Config:
 
         trade_raw = app_cfg.get('trade')
         trade_cfg = _require_mapping(trade_raw, 'app.trade') if trade_raw is not None else {}
-        has_trade_task_fields = any(key in trade_cfg for key in ('sandbox_trade', 'symbol', 'timeframe', 'limit', 'strategy'))
+        has_trade_task_fields = any(key in trade_cfg for key in ('trade_mode', 'sandbox_trade', 'symbol', 'timeframe', 'limit', 'strategy'))
         # Web 场景下的任务级参数会由交易任务配置页和运行快照提供，
         # 因此这里只在 Bot/CLI 直跑模式下强制要求文件里给出完整任务配置。
         if self.mode == 'bot' and not has_trade_task_fields:
             raise ConfigValidationError(
-                'Bot/CLI 模式要求在 app.trade 中提供任务级配置：sandbox_trade、symbol、timeframe、limit、strategy'
+                'Bot/CLI 模式要求在 app.trade 中提供任务级配置：trade_mode、symbol、timeframe、limit、strategy'
             )
 
-        self.trade_sandbox_trade = _require_bool(trade_cfg.get('sandbox_trade', True), 'app.trade.sandbox_trade')
+        self.trade_mode = _normalize_trade_mode(trade_cfg)
+        self.trade_sandbox_trade = self.trade_mode == 'sandbox'
+        self.trade_paper_balance = float(_require_positive_number(trade_cfg.get('paper_balance', DEFAULT_PAPER_BALANCE), 'app.trade.paper_balance'))
         self.trade_symbol = _require_non_empty_string(trade_cfg.get('symbol', 'BTC/USDT'), 'app.trade.symbol')
         self.trade_timeframe = _require_positive_int(trade_cfg.get('timeframe', 15), 'app.trade.timeframe')
         self.trade_limit = _require_positive_int(trade_cfg.get('limit', 100), 'app.trade.limit')
+        task_defaults_overrides = trade_cfg.get('task_defaults', {})
+        if task_defaults_overrides is None:
+            task_defaults_overrides = {}
+        task_defaults_overrides = _require_mapping(task_defaults_overrides, 'app.trade.task_defaults')
+        self.trade_task_defaults_config = merge_config(DEFAULT_TRADE_TASK_DEFAULTS_CONFIG, task_defaults_overrides)
+
+        execution_overrides = trade_cfg.get('execution', {})
+        if execution_overrides is None:
+            execution_overrides = {}
+        execution_overrides = _require_mapping(execution_overrides, 'app.trade.execution')
+        self.trade_execution_config = merge_config(DEFAULT_TRADE_EXECUTION_CONFIG, execution_overrides)
 
         strategy_raw = trade_cfg.get('strategy')
         if strategy_raw is None:
@@ -240,11 +298,15 @@ class Config:
         else:
             strategy_cfg = _require_mapping(strategy_raw, 'app.trade.strategy')
         self.trade_strategy_type = _require_non_empty_string(strategy_cfg.get('type', 'gpt'), 'app.trade.strategy.type')
-        if self.trade_strategy_type not in {'gpt', 'btc_spot_breakout'}:
-            raise ConfigValidationError("配置项 app.trade.strategy.type 只支持 gpt 或 btc_spot_breakout")
+        if self.trade_strategy_type not in {'gpt', 'btc_spot_breakout', 'btc_spot_trend_breakout'}:
+            raise ConfigValidationError("配置项 app.trade.strategy.type 只支持 gpt、btc_spot_breakout 或 btc_spot_trend_breakout")
 
         self.trade_strategy_gpt_config = merge_config(DEFAULT_GPT_STRATEGY_CONFIG, strategy_cfg.get('gpt', {}))
         self.trade_strategy_btc_spot_config = merge_config(DEFAULT_BTC_SPOT_BREAKOUT_CONFIG, strategy_cfg.get('btc_spot_breakout', {}))
+        self.trade_strategy_btc_spot_trend_breakout_config = merge_config(
+            DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG,
+            strategy_cfg.get('btc_spot_trend_breakout', {}),
+        )
 
         persistence_overrides = trade_cfg.get('persistence', {})
         if persistence_overrides is None:
@@ -278,6 +340,17 @@ class Config:
             self.trade_persistence_config.get('restore_position_on_startup'),
             'app.trade.persistence.restore_position_on_startup',
         )
+
+        for key in ('fee_rate', 'slippage_rate', 'daily_loss_stop_threshold'):
+            _require_non_negative_number(self.trade_task_defaults_config.get(key), f'app.trade.task_defaults.{key}')
+            _require_non_negative_number(self.trade_execution_config.get(key), f'app.trade.execution.{key}')
+        for key in ('daily_loss_stop_enabled',):
+            _require_bool(self.trade_task_defaults_config.get(key), f'app.trade.task_defaults.{key}')
+            _require_bool(self.trade_execution_config.get(key), f'app.trade.execution.{key}')
+        if self.trade_task_defaults_config['daily_loss_stop_enabled'] and float(self.trade_task_defaults_config['daily_loss_stop_threshold']) <= 0:
+            raise ConfigValidationError('配置项 app.trade.task_defaults.daily_loss_stop_threshold 必须大于 0')
+        if self.trade_execution_config['daily_loss_stop_enabled'] and float(self.trade_execution_config['daily_loss_stop_threshold']) <= 0:
+            raise ConfigValidationError('配置项 app.trade.execution.daily_loss_stop_threshold 必须大于 0')
 
         web_overrides = app_cfg.get('web', {})
         if web_overrides is None:
@@ -394,6 +467,14 @@ class Config:
             _require_positive_number(btc_spot_cfg.get(key), f'app.trade.strategy.btc_spot_breakout.{key}')
         for key in ('confirm_macd', 'confirm_volume'):
             _require_bool(btc_spot_cfg.get(key), f'app.trade.strategy.btc_spot_breakout.{key}')
+
+        btc_spot_trend_cfg = self.trade_strategy_btc_spot_trend_breakout_config
+        for key in ('ema_fast_period', 'ema_slow_period', 'adx_period', 'breakout_lookback', 'volume_ma_period', 'atr_period'):
+            _require_positive_int(btc_spot_trend_cfg.get(key), f'app.trade.strategy.btc_spot_trend_breakout.{key}')
+        for key in ('adx_threshold', 'volume_multiplier', 'atr_stop_mult', 'atr_trail_mult', 'default_risk_per_trade'):
+            _require_positive_number(btc_spot_trend_cfg.get(key), f'app.trade.strategy.btc_spot_trend_breakout.{key}')
+        if int(btc_spot_trend_cfg.get('ema_fast_period')) >= int(btc_spot_trend_cfg.get('ema_slow_period')):
+            raise ConfigValidationError('配置项 app.trade.strategy.btc_spot_trend_breakout.ema_fast_period 必须小于 ema_slow_period')
 
         logging.info(
             '配置初始化完成: mode=%s provider=%s strategy_type=%s persistence_enabled=%s custom_gpt_base_url=%s',

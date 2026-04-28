@@ -31,6 +31,7 @@ class BacktestJobModel(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     initial_balance: Mapped[float] = mapped_column(Float, nullable=False)
     fee_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    slippage_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     summary_json: Mapped[str] = mapped_column(Text, nullable=False, default='{}')
     params_json: Mapped[str] = mapped_column(Text, nullable=False)
     data_source_json: Mapped[str] = mapped_column(Text, nullable=False, default='{}')

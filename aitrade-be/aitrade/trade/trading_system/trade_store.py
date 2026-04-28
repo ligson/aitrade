@@ -30,6 +30,7 @@ class TradeStore(Protocol):
         results: Optional[Sequence[str]] = None,
         offset: int = 0,
         symbol: Optional[str] = None,
+        run_id: Optional[int] = None,
         created_from: Optional[str] = None,
         created_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]: ...
@@ -41,10 +42,13 @@ class TradeStore(Protocol):
         result: Optional[str] = None,
         results: Optional[Sequence[str]] = None,
         symbol: Optional[str] = None,
+        run_id: Optional[int] = None,
         created_from: Optional[str] = None,
         created_to: Optional[str] = None,
     ) -> int: ...
 
     def query_position_states(self) -> List[Dict[str, Any]]: ...
+
+    def get_daily_loss_summary(self, run_id: int, created_from: str, created_to: str) -> Dict[str, Any]: ...
 
     def list_trade_symbols(self) -> List[str]: ...

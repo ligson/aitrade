@@ -6,8 +6,8 @@ from ..config import config_file
 
 
 class OptimizedCryptoBot:
-    def __init__(self, cfg: config_file.Config):
-        self.trading_bot = TradingBot(cfg)
+    def __init__(self, cfg: config_file.Config, execution_context: dict | None = None):
+        self.trading_bot = TradingBot(cfg, execution_context=execution_context)
         logging.info("优化版交易机器人已初始化")
 
     def run(self, stop_event: Event | None = None):

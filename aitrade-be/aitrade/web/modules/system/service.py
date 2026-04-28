@@ -129,13 +129,19 @@ class SystemService:
 
         trade_cfg = dict(app_cfg.get('trade') or {})
         persistence_cfg = dict(trade_cfg.get('persistence') or {})
+        task_defaults_cfg = dict(trade_cfg.get('task_defaults') or {})
         trade_override = dict(override_params.get('trade') or {})
         persistence_override = dict(trade_override.get('persistence') or {})
+        task_defaults_override = dict(trade_override.get('task_defaults') or {})
         if 'persist_position' in persistence_override:
             persistence_cfg['persist_position'] = persistence_override['persist_position']
         if 'restore_position_on_startup' in persistence_override:
             persistence_cfg['restore_position_on_startup'] = persistence_override['restore_position_on_startup']
+        for key in ('fee_rate', 'slippage_rate', 'daily_loss_stop_enabled', 'daily_loss_stop_threshold'):
+            if key in task_defaults_override:
+                task_defaults_cfg[key] = task_defaults_override[key]
         trade_cfg['persistence'] = persistence_cfg
+        trade_cfg['task_defaults'] = task_defaults_cfg
         app_cfg['trade'] = trade_cfg
 
         backtest_cfg = dict(app_cfg.get('backtest') or {})
@@ -241,6 +247,10 @@ class SystemService:
                 'gptBaseUrl': self.config.gpt_base_url,
                 'persistPosition': self.config.trade_persistence_config['persist_position'],
                 'restorePositionOnStartup': self.config.trade_persistence_config['restore_position_on_startup'],
+                'tradeTaskDefaultFeeRate': self.config.trade_task_defaults_config['fee_rate'],
+                'tradeTaskDefaultSlippageRate': self.config.trade_task_defaults_config['slippage_rate'],
+                'tradeTaskDefaultDailyLossStopEnabled': self.config.trade_task_defaults_config['daily_loss_stop_enabled'],
+                'tradeTaskDefaultDailyLossStopThreshold': self.config.trade_task_defaults_config['daily_loss_stop_threshold'],
                 'supportedSymbols': list(self.config.backtest_config['supported_symbols']),
                 'supportedTimeframes': list(self.config.backtest_config['supported_timeframes']),
                 'defaultSymbol': self.config.backtest_config['default_symbol'],
@@ -261,6 +271,10 @@ class SystemService:
             'gptApiKeyMasked': self._mask_secret(config.gpt_api_key),
             'persistPosition': bool(config.trade_persistence_config['persist_position']),
             'restorePositionOnStartup': bool(config.trade_persistence_config['restore_position_on_startup']),
+            'tradeTaskDefaultFeeRate': float(config.trade_task_defaults_config['fee_rate']),
+            'tradeTaskDefaultSlippageRate': float(config.trade_task_defaults_config['slippage_rate']),
+            'tradeTaskDefaultDailyLossStopEnabled': bool(config.trade_task_defaults_config['daily_loss_stop_enabled']),
+            'tradeTaskDefaultDailyLossStopThreshold': float(config.trade_task_defaults_config['daily_loss_stop_threshold']),
             'supportedSymbols': list(config.backtest_config['supported_symbols']),
             'supportedTimeframes': list(config.backtest_config['supported_timeframes']),
             'defaultSymbol': config.backtest_config['default_symbol'],
@@ -287,6 +301,16 @@ class SystemService:
             'restorePositionOnStartup': persistence_params.get(
                 'restore_position_on_startup',
                 self.config.trade_persistence_config['restore_position_on_startup'],
+            ),
+            'tradeTaskDefaultFeeRate': trade_params.get('task_defaults', {}).get('fee_rate', self.config.trade_task_defaults_config['fee_rate']),
+            'tradeTaskDefaultSlippageRate': trade_params.get('task_defaults', {}).get('slippage_rate', self.config.trade_task_defaults_config['slippage_rate']),
+            'tradeTaskDefaultDailyLossStopEnabled': trade_params.get('task_defaults', {}).get(
+                'daily_loss_stop_enabled',
+                self.config.trade_task_defaults_config['daily_loss_stop_enabled'],
+            ),
+            'tradeTaskDefaultDailyLossStopThreshold': trade_params.get('task_defaults', {}).get(
+                'daily_loss_stop_threshold',
+                self.config.trade_task_defaults_config['daily_loss_stop_threshold'],
             ),
             'supportedSymbols': backtest_params.get('supported_symbols', self.config.backtest_config['supported_symbols']),
             'supportedTimeframes': backtest_params.get('supported_timeframes', self.config.backtest_config['supported_timeframes']),
@@ -322,6 +346,17 @@ class SystemService:
         restore_position_on_startup = editable.get('restorePositionOnStartup')
         if not isinstance(restore_position_on_startup, bool):
             raise ValidationError('是否在启动时恢复持仓必须是布尔值')
+        trade_task_default_fee_rate = self._normalize_non_negative_number(editable.get('tradeTaskDefaultFeeRate'), '交易任务默认手续费率')
+        trade_task_default_slippage_rate = self._normalize_non_negative_number(editable.get('tradeTaskDefaultSlippageRate'), '交易任务默认滑点率')
+        trade_task_default_daily_loss_stop_enabled = editable.get('tradeTaskDefaultDailyLossStopEnabled')
+        if not isinstance(trade_task_default_daily_loss_stop_enabled, bool):
+            raise ValidationError('是否启用交易任务默认单日亏损停机必须是布尔值')
+        trade_task_default_daily_loss_stop_threshold = self._normalize_non_negative_number(
+            editable.get('tradeTaskDefaultDailyLossStopThreshold'),
+            '交易任务默认单日亏损停机阈值',
+        )
+        if trade_task_default_daily_loss_stop_enabled and trade_task_default_daily_loss_stop_threshold <= 0:
+            raise ValidationError('启用交易任务默认单日亏损停机时，阈值必须大于 0')
         supported_symbols = self._normalize_string_list(editable.get('supportedSymbols'), '支持交易对')
         supported_timeframes = self._normalize_string_list(editable.get('supportedTimeframes'), '支持周期')
         default_symbol = str(editable.get('defaultSymbol') or '').strip()
@@ -354,7 +389,13 @@ class SystemService:
                 'persistence': {
                     'persist_position': persist_position,
                     'restore_position_on_startup': restore_position_on_startup,
-                }
+                },
+                'task_defaults': {
+                    'fee_rate': trade_task_default_fee_rate,
+                    'slippage_rate': trade_task_default_slippage_rate,
+                    'daily_loss_stop_enabled': trade_task_default_daily_loss_stop_enabled,
+                    'daily_loss_stop_threshold': trade_task_default_daily_loss_stop_threshold,
+                },
             },
             'backtest': {
                 'supported_symbols': supported_symbols,
@@ -383,6 +424,15 @@ class SystemService:
             seen.add(text)
         if not normalized:
             raise ValidationError(f'{label}不能为空')
+        return normalized
+
+    @staticmethod
+    def _normalize_non_negative_number(value: Any, label: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValidationError(f'{label}必须是数字')
+        normalized = float(value)
+        if normalized < 0:
+            raise ValidationError(f'{label}不能小于 0')
         return normalized
 
     @staticmethod

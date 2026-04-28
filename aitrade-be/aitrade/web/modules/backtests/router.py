@@ -46,6 +46,7 @@ class BacktestRunRequest(BaseModel):
     timerange: str | None = None
     initialBalance: float = 10000
     feeRate: float = 0.001
+    slippageRate: float = 0
 
 
 class BacktestStopRequest(BaseModel):

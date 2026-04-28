@@ -15,10 +15,11 @@ A simple trading system for AI.
 3. Web 管理台中的“系统设置”页会把一部分系统参数保存到数据库，其中 AI 设置页负责 `app.gpt.provider / model / api_key / base_url`，交易设置页负责 `app.trade.persistence.persist_position / restore_position_on_startup`，数据设置页负责 `app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
 4. 因此 `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次打开系统设置页时，会基于文件中的当前值或运行时默认值初始化数据库记录
 5. 如果你只启动 Web 管理台，`config.yaml` 不再要求保留任务级交易参数；真实交易任务参数以数据库任务配置和启动快照为准
-6. 如果你要直接运行 Bot（`uv run python -m aitrade` / `bash start.sh`），再额外补齐 `app.trade.sandbox_trade / symbol / timeframe / limit / strategy.*`
+6. 如果你要直接运行 Bot（`uv run python -m aitrade` / `bash start.sh`），再额外补齐 `app.trade.trade_mode / paper_balance / symbol / timeframe / limit / strategy.*`；其中 `trade_mode` 支持 `live / sandbox / paper`，旧 `sandbox_trade` 仍可兼容映射为 `sandbox / live`
 7. `app.trade.strategy.type` 仅在 Bot/CLI 直跑场景下用于切换交易策略：
    - `gpt`：保留原有 AI 信号策略
-   - `btc_spot_breakout`：BTC 现货 long-only 规则策略
+   - `btc_spot_breakout`：BTC 现货 long-only 单周期突破策略
+   - `btc_spot_trend_breakout`：BTC 现货趋势突破策略，固定 `1h` 执行并使用 `4h` 趋势过滤
 8. 默认会把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`
 
 ## 初始化与运行
@@ -60,10 +61,11 @@ bash stop.sh
 - Web 服务启动后**不会自动运行**交易任务
 - 页面开始任务时，任务级参数以数据库配置与启动快照为准
 - 页面后续修改任务配置，不会影响已经运行中的任务实例
+- 手续费率、滑点率、单日亏损停机开关与阈值属于任务级执行参数：系统设置只提供新建任务默认值，真正生效值保存在任务配置，并在启动时固化到本次 run snapshot
 - Web 场景下，`config.yaml` 只要求保留系统级配置与 `app.trade.persistence`；不再要求保留任务级交易参数占位
 - Web 场景下，系统设置页保存的非敏感参数会覆盖 `config.yaml` 中对应的 `app.gpt`、`app.trade.persistence` 和 `app.backtest` 字段，并作用于后续新回测/新任务
 - AI 密钥与可选 Base URL 已迁到“AI 设置”页维护；交易所凭证、数据库连接、代理、监听地址、目录路径和外部命令等部署期配置仍只来自 `config.yaml`
-- CLI/Bot 直跑场景下，仍需在 `config.yaml` 中提供 `sandbox_trade / symbol / timeframe / limit / strategy.*`
+- CLI/Bot 直跑场景下，仍需在 `config.yaml` 中提供 `trade_mode / paper_balance / symbol / timeframe / limit / strategy.*`；旧 `sandbox_trade` 仍兼容，但新配置推荐统一使用 `trade_mode`
 - 当前页面控制采用 Web 进程内单实例 Runner，只允许同一时刻有一个交易任务运行
 
 当前 Web API 主要服务 `aitrade-fe/` 管理台，默认本地联调地址如下：
@@ -129,6 +131,25 @@ bash stop.sh
 
 > 默认参数为 15 分钟周期做了保守过滤，但 15 分钟噪音仍然较大，建议优先在沙盒环境观察信号质量。
 
+### BTC 现货趋势突破策略
+
+默认策略名：`btc_spot_trend_breakout`
+
+该策略与旧 `btc_spot_breakout` 独立存在，固定语义为“`1h` 执行 + `4h` 趋势过滤”，核心规则为：
+
+- 仅当 `4h EMA20 > EMA50` 且 `ADX` 达到阈值时，允许 `1h` 入场
+- `1h close` 突破最近 `20` 根已完成 K 线高点时考虑做多
+- 当前 `1h` 成交量需高于 `20` 均量乘数阈值
+- 止损基于 `ATR`，止盈采用 `ATR` 追踪止损
+- 仅支持 BTC 现货 long-only 场景
+
+补充约束：
+
+- 当前任务配置与 Bot/CLI 直跑都应使用 `1h` 作为执行周期
+- live / paper / sandbox 会同时加载 `1h` 主周期数据与 `4h` 上下文数据
+- 回测也会按 `1h` 驱动，并在每根 `1h` K 线决策时仅使用当时已闭合的 `4h` 数据，避免未来数据泄漏
+- 若缺少 `4h` 历史数据，live 校验或回测会直接报错
+
 ### 交易记录持久化
 
 - 默认通过 SQLAlchemy 同步 ORM 把交易执行结果写入 `sqlite:///./.aitrade/trades.sqlite3`
@@ -136,6 +157,8 @@ bash stop.sh
 - 主配置项是 `app.trade.persistence.database_url`，将来可切到 MySQL 等数据库；`sqlite_path` 仅作为兼容旧配置的别名
 - `app.trade.persistence.restore_position_on_startup` 默认是 `false`，避免本地快照与真实交易所状态不一致时自动恢复
 - `trade_records` 会记录策略、时间、方向、价格、数量、原因、止损/追踪止损、订单结果、失败原因等字段
+- 交易记录现已补齐 `fee_rate / slippage_rate / estimated_fill_price / estimated_fee / realized_pnl / realized_pnl_net / daily_loss_snapshot` 等执行成本与风控审计字段
+- 后端运行态目录继续统一收敛在 `aitrade-be/`：`config.yaml`、`.venv/`、`.aitrade/`、`logs/`、`dist/` 都视为本地运行或打包产物，不应再在仓库根目录保留新的同类文件
 
 常见查询方式：
 
@@ -146,6 +169,24 @@ bash query-trades.sh side buy 20
 bash query-trades.sh failed 20
 bash query-trades.sh position
 ```
+
+## 交易方式
+
+当前统一支持三种交易方式：
+
+- `live` / 真实交易：真实行情，真实下单
+- `sandbox` / 沙盒交易：沙盒行情，沙盒下单
+- `paper` / 纸上交易：真实行情，不真实下单
+
+兼容说明：
+
+- 新配置推荐使用 `app.trade.trade_mode`
+- 旧 `app.trade.sandbox_trade=true` 会自动映射为 `sandbox`
+- 旧 `app.trade.sandbox_trade=false` 会自动映射为 `live`
+- `app.trade.paper_balance` 用于纸上交易的本地虚拟 USDT 余额，默认 `10000`
+- `app.trade.task_defaults.*` 仅提供新建任务默认值；`app.trade.execution.*` 表示某次运行快照里的真实执行参数
+- `paper` 模式会按 `fee_rate / slippage_rate` 估算成交价与手续费；`live / sandbox` 优先使用交易所回包中的成交均价、金额和手续费，缺失时再按配置估算
+- 任务级单日亏损停机当前按“当前 run + UTC 当日 + 卖出已实现净亏损”口径执行，达到阈值后停止后续周期，不会把该次停止记为失败
 
 ## 项目流程
 
@@ -198,6 +239,8 @@ bash query-trades.sh position
 - 历史数据管理页可选交易对来自 `app.backtest.supported_symbols`
 - 导入与导出统一使用 zip 压缩包；导出压缩包内会附带 `manifest.json`
 - 回测任务创建优先按历史文件发起，`data_source_json` 会记录文件名、路径、格式、大小和文件覆盖时间范围
+- 回测任务当前支持 `feeRate` 与 `slippageRate` 两个成交成本参数；`slippageRate` 默认为 `0`
+- `btc_spot_trend_breakout` 回测固定按 `1h` 主周期运行，并额外要求可用的 `4h` 历史数据
 - 如果开启了 `app.http_client.proxy_enable`，回测历史数据下载会自动复用同一代理配置访问 Binance
 - 若仍出现证书校验失败，通常是本机代理链路或证书环境问题，不是回测目录路径问题
 
@@ -218,7 +261,7 @@ bash query-trades.sh position
 - 当前仓库未内置测试套件，本次主要做了脚本语法检查与定向验证
 - `start.sh` / `status.sh` / `stop.sh` 依赖 `aitrade-be/` 下的 `.aitrade/` 运行态目录
 - 主应用日志、交易日志和启动辅助日志默认写入 `aitrade-be/logs/`
-- 如果本地配置指向真实交易环境，运行脚本前请先确认 `config.yaml` 中的沙盒与凭证配置
+- 如果本地配置指向真实交易环境，运行脚本前请先确认 `config.yaml` 中的 `trade_mode`、交易所凭证与代理配置；其中 `paper` 会读取真实行情但不会真实下单
 
 ## 打包
 

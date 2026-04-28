@@ -11,6 +11,7 @@ export interface BacktestSummary {
   completedTradeCount: number
   winRate: number
   requiredHistory: number
+  slippageRate: number
 }
 
 export interface BacktestDataStatus {
@@ -90,6 +91,7 @@ export interface BacktestJobItem {
   status: string
   initialBalance: number
   feeRate: number
+  slippageRate: number
   summary: Partial<BacktestSummary>
   params: Record<string, unknown>
   dataSource: BacktestJobDataSource

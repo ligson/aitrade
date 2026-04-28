@@ -62,6 +62,7 @@ export function runBacktest(payload: {
   dataFile?: string
   initialBalance: number
   feeRate: number
+  slippageRate: number
 }) {
   return post<BacktestJobItem>('/api/backtests/run', payload)
 }

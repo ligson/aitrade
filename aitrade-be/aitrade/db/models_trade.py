@@ -19,10 +19,14 @@ class TradeRecordModel(Base):
         Index('idx_trade_records_strategy_created_at', 'strategy', 'created_at'),
         Index('idx_trade_records_symbol_created_at', 'symbol', 'created_at'),
         Index('idx_trade_records_result_created_at', 'result', 'created_at'),
+        Index('idx_trade_records_run_created_at', 'run_id', 'created_at'),
+        Index('idx_trade_records_profile_created_at', 'trade_task_profile_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
+    run_id: Mapped[Optional[int]] = mapped_column(Integer)
+    trade_task_profile_id: Mapped[Optional[int]] = mapped_column(Integer)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     strategy: Mapped[str] = mapped_column(String, nullable=False)
     trigger_source: Mapped[str] = mapped_column(String, nullable=False)
@@ -36,6 +40,7 @@ class TradeRecordModel(Base):
     risk_per_trade: Mapped[Optional[float]] = mapped_column(Float)
     exchange_type: Mapped[str] = mapped_column(String, nullable=False)
     sandbox: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    trade_mode: Mapped[str] = mapped_column(String, nullable=False, default='sandbox')
     result: Mapped[str] = mapped_column(String, nullable=False)
     result_reason: Mapped[Optional[str]] = mapped_column(Text)
     order_id: Mapped[Optional[str]] = mapped_column(String)
@@ -44,7 +49,14 @@ class TradeRecordModel(Base):
     order_price: Mapped[Optional[float]] = mapped_column(Float)
     order_amount: Mapped[Optional[float]] = mapped_column(Float)
     order_cost: Mapped[Optional[float]] = mapped_column(Float)
+    fee_rate: Mapped[Optional[float]] = mapped_column(Float)
+    slippage_rate: Mapped[Optional[float]] = mapped_column(Float)
+    estimated_fill_price: Mapped[Optional[float]] = mapped_column(Float)
+    estimated_fee: Mapped[Optional[float]] = mapped_column(Float)
+    realized_pnl: Mapped[Optional[float]] = mapped_column(Float)
+    realized_pnl_net: Mapped[Optional[float]] = mapped_column(Float)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
+    daily_loss_snapshot_json: Mapped[Optional[str]] = mapped_column(Text)
     signal_meta_json: Mapped[Optional[str]] = mapped_column(Text)
     risk_snapshot_json: Mapped[Optional[str]] = mapped_column(Text)
     position_before_json: Mapped[Optional[str]] = mapped_column(Text)

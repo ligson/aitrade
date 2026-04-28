@@ -27,6 +27,7 @@ from ....db.session import get_engine
 from ....db.session import get_session_factory
 from ....trade.strategies.registry import get_strategy_definition
 from ....trade.trade import OptimizedCryptoBot
+from ....trade.trading_system.trade_executor import TradingHaltError
 from ...exceptions import NotFoundError
 from ...exceptions import ValidationError
 from ..strategies.params import normalize_strategy_params
@@ -44,6 +45,7 @@ STATUS_STALE = 'stale'
 ACTIVE_STATUSES = {STATUS_STARTING, STATUS_RUNNING, STATUS_STOP_REQUESTED}
 DEFAULT_RUNNER_NAME = 'default'
 DEFAULT_LOG_LIMIT = 20
+TRADE_MODES = {'live', 'sandbox', 'paper'}
 
 
 class TradeTaskService:
@@ -101,12 +103,19 @@ class TradeTaskService:
         trade_limit = int(payload.get('tradeLimit') or 0)
         if trade_limit <= 0:
             raise ValidationError('K 线数量必须大于 0')
+        fee_rate = self._normalize_non_negative_float(payload.get('feeRate'), '手续费率')
+        slippage_rate = self._normalize_non_negative_float(payload.get('slippageRate'), '滑点率')
+        daily_loss_stop_enabled = self._normalize_bool(payload.get('dailyLossStopEnabled'), '是否启用单日亏损停机')
+        daily_loss_stop_threshold = self._normalize_non_negative_float(payload.get('dailyLossStopThreshold'), '单日亏损停机阈值')
+        if daily_loss_stop_enabled and daily_loss_stop_threshold <= 0:
+            raise ValidationError('启用单日亏损停机时，阈值必须大于 0')
         runner_name = str(payload.get('runnerName') or DEFAULT_RUNNER_NAME).strip() or DEFAULT_RUNNER_NAME
         if runner_name != DEFAULT_RUNNER_NAME:
             raise ValidationError('当前仅支持 default runner')
         enabled = bool(payload.get('enabled', True))
         description = str(payload.get('description') or '').strip()
-        sandbox_trade = bool(payload.get('sandboxTrade', True))
+        trade_mode = self._normalize_trade_mode_payload(payload)
+        sandbox_trade = trade_mode == 'sandbox'
         profile_id = payload.get('id')
         now = self._now_iso()
 
@@ -116,9 +125,18 @@ class TradeTaskService:
                 raise NotFoundError('策略配置不存在')
             if not strategy_profile.enabled:
                 raise ValidationError('所选策略配置已停用')
+            if strategy_profile.strategy_type == 'btc_spot_trend_breakout' and timeframe != '1h':
+                raise ValidationError('BTC 现货趋势突破策略的交易任务周期当前固定为 1h')
 
             if profile_id is None:
-                logging.info('创建交易任务配置: name=%s symbol=%s timeframe=%s strategy_profile_id=%s', name, symbol, timeframe, strategy_profile_id)
+                logging.info(
+                    '创建交易任务配置: name=%s symbol=%s timeframe=%s strategy_profile_id=%s trade_mode=%s',
+                    name,
+                    symbol,
+                    timeframe,
+                    strategy_profile_id,
+                    trade_mode,
+                )
                 model = TradeTaskProfileModel(
                     name=name,
                     description=description,
@@ -128,7 +146,12 @@ class TradeTaskService:
                     symbol=symbol,
                     timeframe=timeframe,
                     sandbox_trade=sandbox_trade,
+                    trade_mode=trade_mode,
                     trade_limit=trade_limit,
+                    fee_rate=fee_rate,
+                    slippage_rate=slippage_rate,
+                    daily_loss_stop_enabled=daily_loss_stop_enabled,
+                    daily_loss_stop_threshold=daily_loss_stop_threshold,
                     runner_name=runner_name,
                     created_at=now,
                     updated_at=now,
@@ -137,7 +160,15 @@ class TradeTaskService:
                 session.commit()
                 session.refresh(model)
             else:
-                logging.info('更新交易任务配置: id=%s name=%s symbol=%s timeframe=%s strategy_profile_id=%s', profile_id, name, symbol, timeframe, strategy_profile_id)
+                logging.info(
+                    '更新交易任务配置: id=%s name=%s symbol=%s timeframe=%s strategy_profile_id=%s trade_mode=%s',
+                    profile_id,
+                    name,
+                    symbol,
+                    timeframe,
+                    strategy_profile_id,
+                    trade_mode,
+                )
                 model = session.get(TradeTaskProfileModel, int(profile_id))
                 if model is None:
                     raise NotFoundError('交易任务配置不存在')
@@ -149,7 +180,12 @@ class TradeTaskService:
                 model.symbol = symbol
                 model.timeframe = timeframe
                 model.sandbox_trade = sandbox_trade
+                model.trade_mode = trade_mode
                 model.trade_limit = trade_limit
+                model.fee_rate = fee_rate
+                model.slippage_rate = slippage_rate
+                model.daily_loss_stop_enabled = daily_loss_stop_enabled
+                model.daily_loss_stop_threshold = daily_loss_stop_threshold
                 model.runner_name = runner_name
                 model.updated_at = now
                 session.commit()
@@ -360,6 +396,7 @@ class TradeTaskService:
             normalized_params = normalize_strategy_params(definition, json.loads(strategy_profile.params_json or '{}'))
             now = self._now_iso()
             created_by = str(current_user.get('username') or current_user.get('nickname') or current_user.get('id') or '')
+            trade_mode = self._normalize_trade_mode_value(profile.trade_mode, bool(profile.sandbox_trade))
             snapshot = {
                 'profileId': profile.id,
                 'profileName': profile.name,
@@ -371,8 +408,15 @@ class TradeTaskService:
                 'strategyParams': normalized_params,
                 'symbol': profile.symbol,
                 'timeframe': profile.timeframe,
-                'sandboxTrade': bool(profile.sandbox_trade),
+                'tradeMode': trade_mode,
+                'sandboxTrade': trade_mode == 'sandbox',
                 'tradeLimit': int(profile.trade_limit),
+                'execution': {
+                    'feeRate': float(profile.fee_rate),
+                    'slippageRate': float(profile.slippage_rate),
+                    'dailyLossStopEnabled': bool(profile.daily_loss_stop_enabled),
+                    'dailyLossStopThreshold': float(profile.daily_loss_stop_threshold),
+                },
             }
             run = TradeTaskRunModel(
                 runner_name=profile.runner_name,
@@ -383,8 +427,13 @@ class TradeTaskService:
                 strategy_schema_version=definition['schemaVersion'],
                 symbol=profile.symbol,
                 timeframe=profile.timeframe,
-                sandbox_trade=bool(profile.sandbox_trade),
+                sandbox_trade=trade_mode == 'sandbox',
+                trade_mode=trade_mode,
                 trade_limit=int(profile.trade_limit),
+                fee_rate=float(profile.fee_rate),
+                slippage_rate=float(profile.slippage_rate),
+                daily_loss_stop_enabled=bool(profile.daily_loss_stop_enabled),
+                daily_loss_stop_threshold=float(profile.daily_loss_stop_threshold),
                 strategy_params_json=json.dumps(normalized_params, ensure_ascii=False),
                 snapshot_json=json.dumps(snapshot, ensure_ascii=False),
                 status=STATUS_STARTING,
@@ -413,7 +462,13 @@ class TradeTaskService:
         try:
             # 先把系统级生效配置与任务快照拼成当前运行时配置，再创建真实 bot 实例。
             runtime_config, run_payload = self._build_runtime_config(run_id)
-            bot = OptimizedCryptoBot(runtime_config)
+            bot = OptimizedCryptoBot(
+                runtime_config,
+                execution_context={
+                    'run_id': run_id,
+                    'trade_task_profile_id': run_payload['tradeTaskProfileId'],
+                },
+            )
             now = self._now_iso()
             timeframe_minutes = self._timeframe_to_minutes(run_payload['timeframe'])
             logging.info('交易任务运行线程已启动: run_id=%s timeframe_minutes=%s', run_id, timeframe_minutes)
@@ -525,6 +580,9 @@ class TradeTaskService:
                         'stoppedAt': stopped_at,
                     },
                 )
+        except TradingHaltError as exc:
+            logging.warning('交易任务触发风控停机: run_id=%s reason=%s detail=%s', run_id, exc.reason, exc.detail)
+            self._mark_risk_halted(run_id, exc)
         except ConfigValidationError as exc:
             logging.error('交易任务运行配置校验失败: run_id=%s error=%s', run_id, exc)
             self._mark_failed(STATUS_CONFIG_ERROR, str(exc), run_id)
@@ -553,11 +611,22 @@ class TradeTaskService:
         strategy_params = run_payload['strategyParams']
         strategy_cfg['type'] = run_payload['strategyType']
         strategy_cfg[run_payload['strategyType']] = strategy_params
-        trade_cfg['sandbox_trade'] = bool(run_payload['sandboxTrade'])
+        trade_cfg['trade_mode'] = run_payload['tradeMode']
+        trade_cfg['sandbox_trade'] = run_payload['tradeMode'] == 'sandbox'
         trade_cfg['symbol'] = run_payload['symbol']
         trade_cfg['timeframe'] = self._timeframe_to_minutes(run_payload['timeframe'])
         trade_cfg['limit'] = int(run_payload['tradeLimit'])
         trade_cfg['strategy'] = strategy_cfg
+        execution_snapshot = dict(run_payload['snapshot'].get('execution') or {})
+        trade_cfg['execution'] = {
+            'fee_rate': float(execution_snapshot.get('feeRate', run_payload['feeRate'])),
+            'slippage_rate': float(execution_snapshot.get('slippageRate', run_payload['slippageRate'])),
+            'daily_loss_stop_enabled': bool(execution_snapshot.get('dailyLossStopEnabled', run_payload['dailyLossStopEnabled'])),
+            'daily_loss_stop_threshold': float(execution_snapshot.get('dailyLossStopThreshold', run_payload['dailyLossStopThreshold'])),
+        }
+        persistence_cfg = dict(trade_cfg.get('persistence') or {})
+        persistence_cfg['execution'] = dict(trade_cfg['execution'])
+        trade_cfg['persistence'] = persistence_cfg
         app_cfg['trade'] = trade_cfg
         config_data['app'] = app_cfg
         logging.debug(
@@ -625,6 +694,30 @@ class TradeTaskService:
                     'errorMessage': error_message,
                     'stoppedAt': now,
                 },
+            )
+
+    def _mark_risk_halted(self, run_id: int | None, exc: TradingHaltError) -> None:
+        now = self._now_iso()
+        detail = dict(exc.detail or {})
+        detail.setdefault('reason', exc.reason)
+        detail.setdefault('stoppedAt', now)
+        with self._lock:
+            model = self._get_or_create_runtime()
+            model.status = STATUS_STOPPED
+            model.stopped_at = now
+            model.next_run_at = None
+            model.last_heartbeat_at = now
+            model.last_error = ''
+            model.updated_at = now
+            self._save_runtime(model)
+            if run_id:
+                self._update_run_status(run_id, status=STATUS_STOPPED, finished_at=now, error_message='')
+            self._append_log(
+                run_id=run_id,
+                event_type='risk_halt_triggered',
+                status=model.status,
+                message='触发单日亏损停机，交易任务已停止',
+                detail=detail,
             )
 
     def _mark_stale_if_needed(self) -> None:
@@ -773,6 +866,7 @@ class TradeTaskService:
         model: TradeTaskProfileModel,
         strategy_profile: StrategyProfileModel | None,
     ) -> dict[str, Any]:
+        trade_mode = self._normalize_trade_mode_value(model.trade_mode, bool(model.sandbox_trade))
         return {
             'id': model.id,
             'name': model.name,
@@ -783,8 +877,13 @@ class TradeTaskService:
             'strategyType': model.strategy_type,
             'symbol': model.symbol,
             'timeframe': model.timeframe,
-            'sandboxTrade': bool(model.sandbox_trade),
+            'tradeMode': trade_mode,
+            'sandboxTrade': trade_mode == 'sandbox',
             'tradeLimit': model.trade_limit,
+            'feeRate': float(model.fee_rate),
+            'slippageRate': float(model.slippage_rate),
+            'dailyLossStopEnabled': bool(model.daily_loss_stop_enabled),
+            'dailyLossStopThreshold': float(model.daily_loss_stop_threshold),
             'runnerName': model.runner_name,
             'createdAt': model.created_at,
             'updatedAt': model.updated_at,
@@ -792,6 +891,7 @@ class TradeTaskService:
 
     @staticmethod
     def _serialize_run(model: TradeTaskRunModel) -> dict[str, Any]:
+        trade_mode = TradeTaskService._normalize_trade_mode_value(model.trade_mode, bool(model.sandbox_trade))
         return {
             'id': model.id,
             'runnerName': model.runner_name,
@@ -802,8 +902,13 @@ class TradeTaskService:
             'strategySchemaVersion': model.strategy_schema_version,
             'symbol': model.symbol,
             'timeframe': model.timeframe,
-            'sandboxTrade': bool(model.sandbox_trade),
+            'tradeMode': trade_mode,
+            'sandboxTrade': trade_mode == 'sandbox',
             'tradeLimit': model.trade_limit,
+            'feeRate': float(model.fee_rate),
+            'slippageRate': float(model.slippage_rate),
+            'dailyLossStopEnabled': bool(model.daily_loss_stop_enabled),
+            'dailyLossStopThreshold': float(model.daily_loss_stop_threshold),
             'strategyParams': json.loads(model.strategy_params_json or '{}'),
             'snapshot': json.loads(model.snapshot_json or '{}'),
             'status': model.status,
@@ -896,6 +1001,69 @@ class TradeTaskService:
                 with self.engine.begin() as connection:
                     for name, ddl in missing_columns.items():
                         connection.execute(text(f'ALTER TABLE trade_task_logs ADD COLUMN {name} {ddl}'))
+
+        if 'trade_task_profiles' in inspector.get_table_names():
+            columns = {column['name'] for column in inspector.get_columns('trade_task_profiles')}
+            column_definitions = {
+                'trade_mode': "VARCHAR DEFAULT 'sandbox'",
+                'fee_rate': 'FLOAT DEFAULT 0',
+                'slippage_rate': 'FLOAT DEFAULT 0',
+                'daily_loss_stop_enabled': 'BOOLEAN DEFAULT 0',
+                'daily_loss_stop_threshold': 'FLOAT DEFAULT 0',
+            }
+            missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
+            if missing_columns:
+                logging.info('检测到 trade_task_profiles 缺少历史字段，自动补列: columns=%s', list(missing_columns.keys()))
+                with self.engine.begin() as connection:
+                    for name, ddl in missing_columns.items():
+                        connection.execute(text(f'ALTER TABLE trade_task_profiles ADD COLUMN {name} {ddl}'))
+
+        if 'trade_task_runs' in inspector.get_table_names():
+            columns = {column['name'] for column in inspector.get_columns('trade_task_runs')}
+            column_definitions = {
+                'trade_mode': "VARCHAR DEFAULT 'sandbox'",
+                'fee_rate': 'FLOAT DEFAULT 0',
+                'slippage_rate': 'FLOAT DEFAULT 0',
+                'daily_loss_stop_enabled': 'BOOLEAN DEFAULT 0',
+                'daily_loss_stop_threshold': 'FLOAT DEFAULT 0',
+            }
+            missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
+            if missing_columns:
+                logging.info('检测到 trade_task_runs 缺少历史字段，自动补列: columns=%s', list(missing_columns.keys()))
+                with self.engine.begin() as connection:
+                    for name, ddl in missing_columns.items():
+                        connection.execute(text(f'ALTER TABLE trade_task_runs ADD COLUMN {name} {ddl}'))
+
+    @staticmethod
+    def _normalize_trade_mode_value(trade_mode: str | None, sandbox_trade: bool = True) -> str:
+        normalized = str(trade_mode or '').strip().lower()
+        if normalized in TRADE_MODES:
+            return normalized
+        return 'sandbox' if sandbox_trade else 'live'
+
+    def _normalize_trade_mode_payload(self, payload: dict[str, Any]) -> str:
+        raw_trade_mode = payload.get('tradeMode')
+        if raw_trade_mode is not None:
+            normalized = str(raw_trade_mode).strip().lower()
+            if normalized not in TRADE_MODES:
+                raise ValidationError('交易方式只支持 live、sandbox 或 paper')
+            return normalized
+        return 'sandbox' if bool(payload.get('sandboxTrade', True)) else 'live'
+
+    @staticmethod
+    def _normalize_non_negative_float(value: Any, label: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValidationError(f'{label}必须是数字')
+        normalized = float(value)
+        if normalized < 0:
+            raise ValidationError(f'{label}不能小于 0')
+        return normalized
+
+    @staticmethod
+    def _normalize_bool(value: Any, label: str) -> bool:
+        if not isinstance(value, bool):
+            raise ValidationError(f'{label}必须是布尔值')
+        return value
 
     def _normalize_timeframe(self, timeframe: str) -> str:
         # 页面侧通常使用 5m/15m/1h 等字符串周期；这里先按系统支持列表校验，再决定是否接受数字分钟写法。

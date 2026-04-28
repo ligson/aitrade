@@ -1,6 +1,7 @@
 from typing import Optional
 
 from sqlalchemy import Boolean
+from sqlalchemy import Float
 from sqlalchemy import Index
 from sqlalchemy import Integer
 from sqlalchemy import String
@@ -27,7 +28,12 @@ class TradeTaskProfileModel(Base):
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     timeframe: Mapped[str] = mapped_column(String, nullable=False)
     sandbox_trade: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    trade_mode: Mapped[str] = mapped_column(String, nullable=False, default='sandbox')
     trade_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    fee_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    slippage_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    daily_loss_stop_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    daily_loss_stop_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     runner_name: Mapped[str] = mapped_column(String, nullable=False, default='default')
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -50,7 +56,12 @@ class TradeTaskRunModel(Base):
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     timeframe: Mapped[str] = mapped_column(String, nullable=False)
     sandbox_trade: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    trade_mode: Mapped[str] = mapped_column(String, nullable=False, default='sandbox')
     trade_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    fee_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    slippage_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    daily_loss_stop_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    daily_loss_stop_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     strategy_params_json: Mapped[str] = mapped_column(Text, nullable=False, default='{}')
     snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default='{}')
     status: Mapped[str] = mapped_column(String, nullable=False)

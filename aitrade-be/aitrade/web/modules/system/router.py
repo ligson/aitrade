@@ -21,6 +21,10 @@ class SystemSettingsEditableRequest(BaseModel):
     gptBaseUrl: str = ''
     persistPosition: bool
     restorePositionOnStartup: bool
+    tradeTaskDefaultFeeRate: float = 0
+    tradeTaskDefaultSlippageRate: float = 0
+    tradeTaskDefaultDailyLossStopEnabled: bool = False
+    tradeTaskDefaultDailyLossStopThreshold: float = 100
     supportedSymbols: list[str]
     supportedTimeframes: list[str]
     defaultSymbol: str
@@ -72,8 +76,13 @@ class TradeTaskProfileSaveRequest(BaseModel):
     strategyProfileId: int
     symbol: str
     timeframe: str
-    sandboxTrade: bool = True
+    tradeMode: str | None = None
+    sandboxTrade: bool | None = None
     tradeLimit: int
+    feeRate: float = 0
+    slippageRate: float = 0
+    dailyLossStopEnabled: bool = False
+    dailyLossStopThreshold: float = 100
     runnerName: str = 'default'
 
 

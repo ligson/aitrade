@@ -19,11 +19,17 @@
               <template v-if="column.key === 'enabled'">
                 <a-tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled ? '启用' : '停用' }}</a-tag>
               </template>
-              <template v-else-if="column.key === 'sandboxTrade'">
-                <a-tag :color="record.sandboxTrade ? 'gold' : 'blue'">{{ record.sandboxTrade ? '沙盒' : '实盘' }}</a-tag>
+              <template v-else-if="column.key === 'tradeMode'">
+                <a-tag :color="tradeModeTagColor(resolveProfileTradeMode(record))">{{ tradeModeLabel(resolveProfileTradeMode(record)) }}</a-tag>
               </template>
               <template v-else-if="column.key === 'updatedAt'">
                 {{ formatDateTime(text) }}
+              </template>
+              <template v-else-if="column.key === 'feeRate' || column.key === 'slippageRate'">
+                {{ formatRate(text) }}
+              </template>
+              <template v-else-if="column.key === 'dailyLossStopEnabled'">
+                <a-tag :color="record.dailyLossStopEnabled ? 'orange' : 'default'">{{ record.dailyLossStopEnabled ? `已启用 / ${formatNumber(record.dailyLossStopThreshold)}` : '关闭' }}</a-tag>
               </template>
               <template v-else-if="column.key === 'actions'">
                 <a-space size="small" wrap>
@@ -36,7 +42,7 @@
                 </a-space>
               </template>
               <template v-else>
-                {{ text || '-' }}
+                {{ displayText(text) }}
               </template>
             </template>
           </a-table>
@@ -54,9 +60,12 @@
           <a-descriptions-item label="策略类型">{{ strategyTypeLabel(detailProfile.strategyType) }}</a-descriptions-item>
           <a-descriptions-item label="交易对">{{ detailProfile.symbol }}</a-descriptions-item>
           <a-descriptions-item label="周期">{{ detailProfile.timeframe }}</a-descriptions-item>
-          <a-descriptions-item label="模式">{{ detailProfile.sandboxTrade ? '沙盒' : '实盘' }}</a-descriptions-item>
+          <a-descriptions-item label="模式">{{ tradeModeLabel(resolveProfileTradeMode(detailProfile)) }}</a-descriptions-item>
           <a-descriptions-item label="K线数量">{{ detailProfile.tradeLimit }}</a-descriptions-item>
-          <a-descriptions-item label="Runner">{{ detailProfile.runnerName }}</a-descriptions-item>
+          <a-descriptions-item label="手续费率">{{ formatRate(detailProfile.feeRate) }}</a-descriptions-item>
+          <a-descriptions-item label="滑点率">{{ formatRate(detailProfile.slippageRate) }}</a-descriptions-item>
+          <a-descriptions-item label="单日亏损停机">{{ detailProfile.dailyLossStopEnabled ? '已启用' : '关闭' }}</a-descriptions-item>
+          <a-descriptions-item label="单日亏损阈值">{{ formatNumber(detailProfile.dailyLossStopThreshold) }}</a-descriptions-item>
           <a-descriptions-item label="创建时间">{{ formatDateTime(detailProfile.createdAt) }}</a-descriptions-item>
           <a-descriptions-item label="更新时间">{{ formatDateTime(detailProfile.updatedAt) }}</a-descriptions-item>
         </a-descriptions>
@@ -92,16 +101,38 @@
           <a-form-item label="K线数量">
             <a-input-number v-model:value="form.tradeLimit" :min="1" style="width: 100%" />
           </a-form-item>
-          <a-form-item label="Runner">
-            <a-input v-model:value="form.runnerName" />
-          </a-form-item>
         </div>
         <a-form-item label="启用">
           <a-switch v-model:checked="form.enabled" />
         </a-form-item>
-        <a-form-item label="沙盒交易">
-          <a-switch v-model:checked="form.sandboxTrade" />
+        <a-form-item label="交易方式">
+          <a-select v-model:value="form.tradeMode">
+            <a-select-option value="live">真实交易</a-select-option>
+            <a-select-option value="sandbox">沙盒交易</a-select-option>
+            <a-select-option value="paper">纸上交易</a-select-option>
+          </a-select>
+          <div class="mode-help">真实交易：真实行情，真实下单；沙盒交易：沙盒行情，沙盒下单；纸上交易：真实行情，不真实下单。</div>
         </a-form-item>
+        <div class="form-grid">
+          <a-form-item label="手续费率">
+            <a-input-number v-model:value="form.feeRate" :min="0" :step="0.0001" style="width: 100%" />
+          </a-form-item>
+          <a-form-item label="滑点率">
+            <a-input-number v-model:value="form.slippageRate" :min="0" :step="0.0001" style="width: 100%" />
+          </a-form-item>
+          <a-form-item label="启用单日亏损停机">
+            <a-switch v-model:checked="form.dailyLossStopEnabled" />
+          </a-form-item>
+          <a-form-item label="单日亏损停机阈值">
+            <a-input-number
+              v-model:value="form.dailyLossStopThreshold"
+              :min="0"
+              :step="1"
+              :disabled="!form.dailyLossStopEnabled"
+              style="width: 100%"
+            />
+          </a-form-item>
+        </div>
       </a-form>
       <template #footer>
         <a-space>
@@ -122,7 +153,7 @@ import { useRouter } from 'vue-router'
 import { fetchStrategyProfiles } from '@/api/strategies'
 import { deleteTradeTaskProfile, fetchSystemSettings, fetchTradeTaskProfiles, saveTradeTaskProfile } from '@/api/system'
 import type { StrategyProfile } from '@/types/strategy'
-import type { TradeTaskProfile } from '@/types/system'
+import type { TradeMode, TradeTaskProfile } from '@/types/system'
 
 const router = useRouter()
 const detailOpen = ref(false)
@@ -132,15 +163,34 @@ const strategyProfiles = ref<StrategyProfile[]>([])
 const supportedTimeframes = ref<string[]>([])
 const detailProfile = ref<TradeTaskProfile | null>(null)
 
-const form = reactive<{ id?: number; name: string; description: string; enabled: boolean; strategyProfileId?: number; symbol: string; timeframe: string; sandboxTrade: boolean; tradeLimit: number; runnerName: string }>({
+const form = reactive<{
+  id?: number
+  name: string
+  description: string
+  enabled: boolean
+  strategyProfileId?: number
+  symbol: string
+  timeframe: string
+  tradeMode: TradeMode
+  tradeLimit: number
+  feeRate: number
+  slippageRate: number
+  dailyLossStopEnabled: boolean
+  dailyLossStopThreshold: number
+  runnerName: string
+}>({
   name: '',
   description: '',
   enabled: true,
   strategyProfileId: undefined,
   symbol: 'BTC/USDT',
   timeframe: '15m',
-  sandboxTrade: true,
+  tradeMode: 'sandbox',
   tradeLimit: 100,
+  feeRate: 0,
+  slippageRate: 0,
+  dailyLossStopEnabled: false,
+  dailyLossStopThreshold: 100,
   runnerName: 'default',
 })
 
@@ -150,7 +200,10 @@ const profileColumns = [
   { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
   { title: '周期', dataIndex: 'timeframe', key: 'timeframe', width: 100 },
   { title: 'K线数量', dataIndex: 'tradeLimit', key: 'tradeLimit', width: 120 },
-  { title: '模式', dataIndex: 'sandboxTrade', key: 'sandboxTrade', width: 100 },
+  { title: '手续费率', dataIndex: 'feeRate', key: 'feeRate', width: 120 },
+  { title: '滑点率', dataIndex: 'slippageRate', key: 'slippageRate', width: 120 },
+  { title: '单日亏损停机', dataIndex: 'dailyLossStopEnabled', key: 'dailyLossStopEnabled', width: 140 },
+  { title: '模式', dataIndex: 'tradeMode', key: 'tradeMode', width: 120 },
   { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 100 },
   { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
   { title: '操作', key: 'actions', width: 260 },
@@ -163,6 +216,17 @@ function filterSelectOption(input: string, option?: { children?: unknown; value?
   return label.toLowerCase().includes(input.toLowerCase())
 }
 
+function displayText(value: unknown) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed || '-'
+  }
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return String(value)
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return '-'
@@ -171,11 +235,58 @@ function formatDateTime(value: string | null | undefined) {
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : value
 }
 
+function formatNumber(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 8 })
+}
+
+function formatRate(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return `${(Number(value) * 100).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}%`
+}
+
 function strategyTypeLabel(value: string) {
   return strategyProfiles.value.find((item) => item.strategyType === value)?.definition?.displayName || value || '-'
 }
 
-function resetForm() {
+function resolveProfileTradeMode(profile: Pick<TradeTaskProfile, 'tradeMode' | 'sandboxTrade'> | null | undefined): TradeMode {
+  if (profile?.tradeMode) {
+    return profile.tradeMode
+  }
+  return profile?.sandboxTrade === false ? 'live' : 'sandbox'
+}
+
+function tradeModeLabel(value: TradeMode) {
+  if (value === 'live') {
+    return '真实交易'
+  }
+  if (value === 'sandbox') {
+    return '沙盒交易'
+  }
+  if (value === 'paper') {
+    return '纸上交易'
+  }
+  return value || '-'
+}
+
+function tradeModeTagColor(value: TradeMode) {
+  if (value === 'live') {
+    return 'red'
+  }
+  if (value === 'sandbox') {
+    return 'gold'
+  }
+  if (value === 'paper') {
+    return 'blue'
+  }
+  return 'default'
+}
+
+async function resetForm() {
   form.id = undefined
   form.name = ''
   form.description = ''
@@ -183,13 +294,18 @@ function resetForm() {
   form.strategyProfileId = enabledStrategyProfiles.value[0]?.id
   form.symbol = 'BTC/USDT'
   form.timeframe = supportedTimeframes.value[0] || '15m'
-  form.sandboxTrade = true
+  form.tradeMode = 'sandbox'
   form.tradeLimit = 100
+  form.feeRate = 0
+  form.slippageRate = 0
+  form.dailyLossStopEnabled = false
+  form.dailyLossStopThreshold = 100
   form.runnerName = 'default'
+  await loadSettings()
 }
 
-function openCreate() {
-  resetForm()
+async function openCreate() {
+  await resetForm()
   editOpen.value = true
 }
 
@@ -201,8 +317,12 @@ function openEdit(profile: TradeTaskProfile) {
   form.strategyProfileId = profile.strategyProfileId
   form.symbol = profile.symbol
   form.timeframe = profile.timeframe
-  form.sandboxTrade = profile.sandboxTrade
+  form.tradeMode = resolveProfileTradeMode(profile)
   form.tradeLimit = profile.tradeLimit
+  form.feeRate = profile.feeRate
+  form.slippageRate = profile.slippageRate
+  form.dailyLossStopEnabled = profile.dailyLossStopEnabled
+  form.dailyLossStopThreshold = profile.dailyLossStopThreshold
   form.runnerName = profile.runnerName
   editOpen.value = true
 }
@@ -234,6 +354,12 @@ async function loadSettings() {
   if (!form.timeframe) {
     form.timeframe = supportedTimeframes.value[0] || '15m'
   }
+  if (!form.id) {
+    form.feeRate = data.editable.tradeTaskDefaultFeeRate
+    form.slippageRate = data.editable.tradeTaskDefaultSlippageRate
+    form.dailyLossStopEnabled = data.editable.tradeTaskDefaultDailyLossStopEnabled
+    form.dailyLossStopThreshold = data.editable.tradeTaskDefaultDailyLossStopThreshold
+  }
 }
 
 async function submitForm() {
@@ -245,8 +371,12 @@ async function submitForm() {
     strategyProfileId: form.strategyProfileId!,
     symbol: form.symbol,
     timeframe: form.timeframe,
-    sandboxTrade: form.sandboxTrade,
+    tradeMode: form.tradeMode,
     tradeLimit: form.tradeLimit,
+    feeRate: form.feeRate,
+    slippageRate: form.slippageRate,
+    dailyLossStopEnabled: form.dailyLossStopEnabled,
+    dailyLossStopThreshold: form.dailyLossStopThreshold,
     runnerName: form.runnerName,
   })
   message.success('交易任务配置已保存')
@@ -267,7 +397,7 @@ async function removeProfile(id: number) {
 onMounted(async () => {
   await loadStrategyProfiles()
   await loadSettings()
-  resetForm()
+  await resetForm()
   await loadProfiles()
 })
 </script>

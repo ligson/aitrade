@@ -63,7 +63,10 @@
             <div class="cell-text">{{ formatDetailPreview(record.detail) }}</div>
           </template>
           <template v-else-if="column.key === 'actions'">
-            <a-button type="link" @click="openDetail(record)">查看</a-button>
+            <a-space size="small">
+              <a-button type="link" @click="openDetail(record)">查看</a-button>
+              <a-button type="link" :disabled="!record.runId" @click="goToTradeLogs(record)">查看交易日志</a-button>
+            </a-space>
           </template>
           <template v-else>
             {{ text || '-' }}
@@ -111,12 +114,14 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import dayjs, { type Dayjs } from 'dayjs'
 import 'dayjs/locale/zh-cn'
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { pageTradeTaskLogs } from '@/api/system'
 import type { TradeTaskLogItem } from '@/types/system'
 
 dayjs.locale('zh-cn')
 
+const router = useRouter()
 const loading = ref(false)
 const detailOpen = ref(false)
 const rows = ref<TradeTaskLogItem[]>([])
@@ -167,7 +172,7 @@ const columns = [
   { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
   { title: '说明', dataIndex: 'message', key: 'message', width: 240 },
   { title: '详情摘要', key: 'detailPreview', width: 420 },
-  { title: '操作', key: 'actions', width: 100 },
+  { title: '操作', key: 'actions', width: 180 },
 ]
 
 const detailEntries = computed(() => {
@@ -266,6 +271,13 @@ async function loadLogs() {
 function openDetail(record: TradeTaskLogItem) {
   detailRecord.value = record
   detailOpen.value = true
+}
+
+function goToTradeLogs(record: TradeTaskLogItem) {
+  if (!record.runId) {
+    return
+  }
+  router.push({ path: '/trade-logs', query: { runId: String(record.runId) } })
 }
 
 function handleSearch() {

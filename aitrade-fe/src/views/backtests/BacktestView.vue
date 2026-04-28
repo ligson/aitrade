@@ -38,6 +38,9 @@
           <a-form-item label="手续费率" class="filter-item">
             <a-input-number v-model:value="runForm.feeRate" :min="0" :step="0.0001" :precision="4" style="width: 100%" />
           </a-form-item>
+          <a-form-item label="滑点率" class="filter-item">
+            <a-input-number v-model:value="runForm.slippageRate" :min="0" :step="0.0001" :precision="4" style="width: 100%" />
+          </a-form-item>
         </div>
         <a-space wrap>
           <a-button type="primary" :loading="runLoading" :disabled="!runForm.strategyProfileId || !runForm.dataFile" @click="openRunConfirm">开始回测</a-button>
@@ -127,6 +130,7 @@
         <a-descriptions-item label="文件时间范围">{{ selectedTimerangeLabel }}</a-descriptions-item>
         <a-descriptions-item label="初始资金">{{ formatNumber(runForm.initialBalance) }}</a-descriptions-item>
         <a-descriptions-item label="手续费率">{{ formatPercent(runForm.feeRate) }}</a-descriptions-item>
+        <a-descriptions-item label="滑点率">{{ formatPercent(runForm.slippageRate) }}</a-descriptions-item>
       </a-descriptions>
     </a-modal>
 
@@ -158,6 +162,7 @@
           <a-descriptions-item label="结束时间">{{ formatDateTime(detailJob.timerangeTo) }}</a-descriptions-item>
           <a-descriptions-item label="初始资金">{{ formatNumber(detailJob.initialBalance) }}</a-descriptions-item>
           <a-descriptions-item label="手续费率">{{ formatPercent(detailJob.feeRate) }}</a-descriptions-item>
+          <a-descriptions-item label="滑点率">{{ formatPercent(detailJob.slippageRate) }}</a-descriptions-item>
           <a-descriptions-item label="任务创建时间">{{ formatDateTime(detailJob.createdAt) }}</a-descriptions-item>
           <a-descriptions-item label="任务完成时间">{{ formatDateTime(detailJob.finishedAt) }}</a-descriptions-item>
           <a-descriptions-item label="预计完成时间">{{ formatDateTime(detailJob.estimatedFinishAt) }}</a-descriptions-item>
@@ -185,6 +190,7 @@
           <a-descriptions-item label="已完成交易数">{{ detailJob.summary.completedTradeCount ?? '-' }}</a-descriptions-item>
           <a-descriptions-item label="总成交记录数">{{ detailJob.summary.tradeCount ?? '-' }}</a-descriptions-item>
           <a-descriptions-item label="胜率">{{ formatPercent(detailJob.summary.winRate) }}</a-descriptions-item>
+          <a-descriptions-item label="回测滑点率">{{ formatPercent(detailJob.summary.slippageRate) }}</a-descriptions-item>
         </a-descriptions>
 
         <a-alert v-if="detailDefinition" style="margin-top: 16px" type="info" show-icon :message="detailDefinition.displayName" :description="detailDefinition.description" />
@@ -273,6 +279,7 @@ const runForm = reactive({
   dataFile: '',
   initialBalance: 10000,
   feeRate: 0.001,
+  slippageRate: 0,
 })
 
 const filters = reactive({
@@ -578,6 +585,7 @@ async function confirmRunBacktest() {
       dataFile: runForm.dataFile,
       initialBalance: runForm.initialBalance,
       feeRate: runForm.feeRate,
+      slippageRate: runForm.slippageRate,
     })
     runConfirmOpen.value = false
     message.success(job.status === 'unsupported' ? '该策略暂不支持离线回测' : '回测任务已创建')

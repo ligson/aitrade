@@ -217,16 +217,16 @@ class BacktestDataService:
         strategy_params: dict[str, Any],
         initial_balance: float,
         fee_rate: float,
+        slippage_rate: float = 0.0,
         data_file: str | None = None,
         should_stop: Callable[[], bool] | None = None,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> dict[str, Any]:
-        if strategy_type != 'btc_spot_breakout':
-            raise ValidationError('当前仅支持 btc_spot_breakout 策略离线回测')
-        bars = self.load_bars(pair=symbol, timeframe=timeframe)
-        engine = BacktestEngine(fee_rate=fee_rate, initial_balance=initial_balance)
-        result = engine.run_breakout_backtest(
-            bars=bars,
+        dataset = self._build_dataset(strategy_type=strategy_type, symbol=symbol, timeframe=timeframe)
+        engine = BacktestEngine(fee_rate=fee_rate, initial_balance=initial_balance, slippage_rate=slippage_rate)
+        result = engine.run_backtest(
+            strategy_type=strategy_type,
+            dataset=dataset,
             symbol=symbol,
             timeframe=timeframe,
             strategy_params=strategy_params,
@@ -241,6 +241,32 @@ class BacktestDataService:
             status = self.get_data_status(pair=symbol, timeframe=timeframe)
             result['dataSource'] = status
         return result
+
+    def _build_dataset(self, strategy_type: str, symbol: str, timeframe: str) -> dict[str, Any]:
+        if strategy_type == 'btc_spot_breakout':
+            return {
+                'primary_timeframe': timeframe,
+                'primary_bars': self.load_bars(pair=symbol, timeframe=timeframe),
+                'context_bars': {},
+            }
+        if strategy_type == 'btc_spot_trend_breakout':
+            if timeframe != '1h':
+                raise ValidationError('BTC 现货趋势突破策略回测周期当前固定为 1h')
+            primary_bars = self.load_bars(pair=symbol, timeframe='1h')
+            try:
+                trend_bars = self.load_bars(pair=symbol, timeframe='4h')
+            except FileNotFoundError as exc:
+                raise ValidationError(f'缺少 BTC 现货趋势突破策略所需的 4h 历史数据：{exc}') from exc
+            except ValidationError as exc:
+                raise ValidationError(f'缺少 BTC 现货趋势突破策略所需的 4h 历史数据：{exc}') from exc
+            return {
+                'primary_timeframe': '1h',
+                'primary_bars': primary_bars,
+                'context_bars': {
+                    '4h': trend_bars,
+                },
+            }
+        raise ValidationError(f'当前仅支持 btc_spot_breakout 或 btc_spot_trend_breakout 策略离线回测')
 
     @staticmethod
     def normalize_timerange(value: str | None, fallback: str) -> tuple[str, str]:

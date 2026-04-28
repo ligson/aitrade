@@ -1,5 +1,7 @@
 import type { PageData } from './api'
 
+export type TradeMode = 'live' | 'sandbox' | 'paper'
+
 // 仍由部署期文件或运行环境维护、页面只读展示的系统信息。
 export interface SystemSettingsReadonly {
   backtestDataDir: string
@@ -18,6 +20,10 @@ export interface SystemSettingsEditable {
   gptApiKeyMasked: string
   persistPosition: boolean
   restorePositionOnStartup: boolean
+  tradeTaskDefaultFeeRate: number
+  tradeTaskDefaultSlippageRate: number
+  tradeTaskDefaultDailyLossStopEnabled: boolean
+  tradeTaskDefaultDailyLossStopThreshold: number
   supportedSymbols: string[]
   supportedTimeframes: string[]
   defaultSymbol: string
@@ -70,8 +76,13 @@ export interface TradeTaskRunItem {
   strategySchemaVersion: number
   symbol: string
   timeframe: string
-  sandboxTrade: boolean
+  tradeMode?: TradeMode
+  sandboxTrade?: boolean
   tradeLimit: number
+  feeRate: number
+  slippageRate: number
+  dailyLossStopEnabled: boolean
+  dailyLossStopThreshold: number
   strategyParams: Record<string, unknown>
   snapshot: Record<string, unknown>
   status: string
@@ -121,8 +132,13 @@ export interface TradeTaskProfile {
   strategyType: string
   symbol: string
   timeframe: string
-  sandboxTrade: boolean
+  tradeMode?: TradeMode
+  sandboxTrade?: boolean
   tradeLimit: number
+  feeRate: number
+  slippageRate: number
+  dailyLossStopEnabled: boolean
+  dailyLossStopThreshold: number
   runnerName: string
   createdAt: string
   updatedAt: string
@@ -136,8 +152,13 @@ export interface TradeTaskProfileSavePayload {
   strategyProfileId: number
   symbol: string
   timeframe: string
-  sandboxTrade: boolean
+  tradeMode?: TradeMode
+  sandboxTrade?: boolean
   tradeLimit: number
+  feeRate: number
+  slippageRate: number
+  dailyLossStopEnabled: boolean
+  dailyLossStopThreshold: number
   runnerName: string
 }
 

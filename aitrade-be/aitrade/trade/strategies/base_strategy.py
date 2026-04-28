@@ -11,6 +11,12 @@ class BaseStrategy(ABC):
     def get_required_history(self) -> int:
         return 0
 
+    def get_market_data_requirements(self) -> Dict[str, Any]:
+        return {
+            'primary_timeframe': None,
+            'context_timeframes': [],
+        }
+
     @abstractmethod
     def generate_signal(self, market_data: Dict[str, Any], position: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         pass

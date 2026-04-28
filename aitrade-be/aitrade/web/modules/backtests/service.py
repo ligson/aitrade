@@ -32,6 +32,7 @@ STATUS_UNSUPPORTED = 'unsupported'
 TERMINAL_STATUSES = {STATUS_STOPPED, STATUS_SUCCESS, STATUS_FAILED, STATUS_UNSUPPORTED}
 ACTIVE_STATUSES = {STATUS_PENDING, STATUS_RUNNING, STATUS_STOP_REQUESTED}
 STOP_MESSAGE = '用户已停止任务'
+SUPPORTED_STRATEGY_TYPES = {'btc_spot_breakout', 'btc_spot_trend_breakout'}
 
 
 class BacktestService:
@@ -101,10 +102,13 @@ class BacktestService:
             raise ValidationError('请选择策略配置')
         initial_balance = float(payload.get('initialBalance') or 10000)
         fee_rate = float(payload.get('feeRate') or 0.001)
+        slippage_rate = float(payload.get('slippageRate') or 0)
         if initial_balance <= 0:
             raise ValidationError('初始资金必须大于 0')
         if fee_rate < 0:
             raise ValidationError('手续费率不能小于 0')
+        if slippage_rate < 0:
+            raise ValidationError('滑点率不能小于 0')
 
         data_file = str(payload.get('dataFile') or '').strip()
         if data_file:
@@ -144,9 +148,11 @@ class BacktestService:
             if profile is None:
                 raise NotFoundError('策略配置不存在')
             params = json.loads(profile.params_json)
+            if profile.strategy_type == 'btc_spot_trend_breakout' and timeframe != '1h':
+                raise ValidationError('BTC 现货趋势突破策略回测周期当前固定为 1h')
             now = self._now_iso()
-            status = STATUS_PENDING if profile.strategy_type == 'btc_spot_breakout' else STATUS_UNSUPPORTED
-            error_message = '' if status == STATUS_PENDING else '当前仅支持 btc_spot_breakout 策略离线回测'
+            status = STATUS_PENDING if profile.strategy_type in SUPPORTED_STRATEGY_TYPES else STATUS_UNSUPPORTED
+            error_message = '' if status == STATUS_PENDING else '当前仅支持 btc_spot_breakout 与 btc_spot_trend_breakout 策略离线回测'
             job = BacktestJobModel(
                 strategy_type=profile.strategy_type,
                 strategy_profile_id=profile.id,
@@ -158,6 +164,7 @@ class BacktestService:
                 status=status,
                 initial_balance=initial_balance,
                 fee_rate=fee_rate,
+                slippage_rate=slippage_rate,
                 summary_json=json.dumps({}, ensure_ascii=False),
                 params_json=json.dumps(params, ensure_ascii=False),
                 data_source_json=json.dumps(data_source, ensure_ascii=False),
@@ -230,6 +237,7 @@ class BacktestService:
             data_file = str(data_source.get('filename') or '').strip() if isinstance(data_source, dict) else ''
             initial_balance = float(job.initial_balance)
             fee_rate = float(job.fee_rate)
+            slippage_rate = float(job.slippage_rate or 0)
 
         try:
             result = self.data_service.run_backtest(
@@ -241,6 +249,7 @@ class BacktestService:
                 strategy_params=params,
                 initial_balance=initial_balance,
                 fee_rate=fee_rate,
+                slippage_rate=slippage_rate,
                 data_file=data_file or None,
                 should_stop=lambda: self._should_stop(job_id),
                 on_progress=lambda current, total: self._update_job_progress(job_id, current, total),
@@ -368,6 +377,7 @@ class BacktestService:
             'progress_total': 'INTEGER',
             'estimated_finish_at': 'VARCHAR',
             'last_progress_at': 'VARCHAR',
+            'slippage_rate': 'FLOAT NOT NULL DEFAULT 0',
         }
         missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
         if not missing_columns:
@@ -420,6 +430,7 @@ class BacktestService:
             'status': model.status,
             'initialBalance': model.initial_balance,
             'feeRate': model.fee_rate,
+            'slippageRate': model.slippage_rate,
             'summary': json.loads(model.summary_json or '{}'),
             'params': json.loads(model.params_json or '{}'),
             'dataSource': json.loads(model.data_source_json or '{}'),

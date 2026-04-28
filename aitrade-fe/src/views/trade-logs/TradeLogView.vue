@@ -1,6 +1,13 @@
 <template>
   <a-card class="page-card">
     <a-space direction="vertical" size="large" style="width: 100%">
+      <a-alert
+        type="info"
+        show-icon
+        message="这里展示的是交易结果日志，可按条件筛选具体成交、跳过、风控拒绝和失败记录。"
+        :description="activeRunTip"
+      />
+
       <a-form layout="vertical" class="filter-form">
         <div class="filter-grid">
           <a-form-item label="策略" class="filter-item">
@@ -31,6 +38,9 @@
               </a-select-option>
             </a-select>
           </a-form-item>
+          <a-form-item label="运行实例 ID" class="filter-item">
+            <a-input-number v-model:value="filters.runId" placeholder="全部实例" :min="1" :precision="0" style="width: 100%" />
+          </a-form-item>
           <a-form-item label="交易时间" class="filter-item filter-item-range">
             <a-config-provider :locale="zhCN">
               <a-range-picker v-model:value="filters.createdRange" show-time style="width: 100%" />
@@ -43,22 +53,46 @@
           <a-button @click="loadPositions">查看当前持仓</a-button>
         </a-space>
       </a-form>
+
       <a-table :data-source="rows" :columns="columns" row-key="id" :loading="loading" :pagination="pagination" :scroll="{ x: 'max-content' }" @change="handleTableChange">
-        <template #bodyCell="{ column, text }">
+        <template #bodyCell="{ column, record, text }">
           <template v-if="column.key === 'created_at'">
             {{ formatDateTime(text) }}
           </template>
           <template v-else-if="column.key === 'side'">
-            <a-tag :color="sideTagColor(text)">{{ sideLabel(text) }}</a-tag>
+            <a-tag :color="sideTagColor(record.side)">{{ sideLabel(record.side) }}</a-tag>
+          </template>
+          <template v-else-if="column.key === 'trade_mode'">
+            <a-tag :color="tradeModeTagColor(resolveTradeMode(record))">{{ tradeModeLabel(resolveTradeMode(record)) }}</a-tag>
           </template>
           <template v-else-if="column.key === 'result'">
-            <a-tag :color="resultTagColor(text)">{{ resultLabel(text) }}</a-tag>
+            <a-tag :color="resultTagColor(record.result)">{{ resultLabel(record.result) }}</a-tag>
           </template>
-          <template v-else-if="column.key === 'market_price' || column.key === 'requested_amount'">
+          <template
+            v-else-if="[
+              'market_price',
+              'requested_amount',
+              'estimated_fill_price',
+              'estimated_fee',
+              'realized_pnl_net',
+            ].includes(String(column.key))"
+          >
             {{ formatNumber(text) }}
           </template>
           <template v-else-if="column.key === 'symbol'">
             {{ formatSymbol(text) }}
+          </template>
+          <template v-else-if="column.key === 'run_id'">
+            {{ record.run_id ?? '-' }}
+          </template>
+          <template v-else-if="column.key === 'trigger_source'">
+            <div class="cell-text">{{ triggerSourceLabel(record.trigger_source) }}</div>
+          </template>
+          <template v-else-if="column.key === 'error_message' || column.key === 'result_reason'">
+            <div class="cell-text">{{ displayText(text) }}</div>
+          </template>
+          <template v-else-if="column.key === 'actions'">
+            <a-button type="link" @click="openDetail(record)">查看</a-button>
           </template>
           <template v-else>
             {{ displayText(text) }}
@@ -66,14 +100,101 @@
         </template>
       </a-table>
     </a-space>
-    <a-drawer v-model:open="drawerOpen" title="当前持仓" width="720">
+
+    <a-drawer v-model:open="detailOpen" title="交易日志详情" width="960">
+      <template v-if="detailRecord">
+        <a-space direction="vertical" size="middle" style="width: 100%">
+          <a-descriptions :column="2" bordered size="small">
+            <a-descriptions-item label="日志 ID">{{ detailRecord.id }}</a-descriptions-item>
+            <a-descriptions-item label="运行实例 ID">{{ detailRecord.run_id ?? '-' }}</a-descriptions-item>
+            <a-descriptions-item label="任务配置 ID">{{ detailRecord.trade_task_profile_id ?? '-' }}</a-descriptions-item>
+            <a-descriptions-item label="交易对">{{ formatSymbol(detailRecord.symbol) }}</a-descriptions-item>
+            <a-descriptions-item label="策略">{{ displayText(detailRecord.strategy) }}</a-descriptions-item>
+            <a-descriptions-item label="方向">{{ sideLabel(detailRecord.side) }}</a-descriptions-item>
+            <a-descriptions-item label="结果">
+              <a-tag :color="resultTagColor(detailRecord.result)">{{ resultLabel(detailRecord.result) }}</a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item label="触发来源">{{ triggerSourceLabel(detailRecord.trigger_source) }}</a-descriptions-item>
+            <a-descriptions-item label="时间">{{ formatDateTime(detailRecord.created_at) }}</a-descriptions-item>
+            <a-descriptions-item label="交易方式">{{ tradeModeLabel(resolveTradeMode(detailRecord)) }}</a-descriptions-item>
+            <a-descriptions-item label="结果原因" :span="2">{{ displayText(detailRecord.result_reason) }}</a-descriptions-item>
+            <a-descriptions-item label="错误信息" :span="2">{{ displayText(detailRecord.error_message) }}</a-descriptions-item>
+          </a-descriptions>
+
+          <a-card size="small" title="价格与数量">
+            <a-descriptions :column="2" bordered size="small">
+              <a-descriptions-item label="市场价格">{{ formatNumber(detailRecord.market_price) }}</a-descriptions-item>
+              <a-descriptions-item label="请求数量">{{ formatNumber(detailRecord.requested_amount) }}</a-descriptions-item>
+              <a-descriptions-item label="订单 ID">{{ displayText(detailRecord.order_id) }}</a-descriptions-item>
+              <a-descriptions-item label="订单状态">{{ displayText(detailRecord.order_status) }}</a-descriptions-item>
+              <a-descriptions-item label="订单类型">{{ displayText(detailRecord.order_type) }}</a-descriptions-item>
+              <a-descriptions-item label="订单价格">{{ formatNumber(detailRecord.order_price) }}</a-descriptions-item>
+              <a-descriptions-item label="订单数量">{{ formatNumber(detailRecord.order_amount) }}</a-descriptions-item>
+              <a-descriptions-item label="订单金额">{{ formatNumber(detailRecord.order_cost) }}</a-descriptions-item>
+              <a-descriptions-item label="估算成交价">{{ formatNumber(detailRecord.estimated_fill_price) }}</a-descriptions-item>
+              <a-descriptions-item label="估算手续费">{{ formatNumber(detailRecord.estimated_fee) }}</a-descriptions-item>
+              <a-descriptions-item label="手续费率">{{ formatRate(detailRecord.fee_rate) }}</a-descriptions-item>
+              <a-descriptions-item label="滑点率">{{ formatRate(detailRecord.slippage_rate) }}</a-descriptions-item>
+              <a-descriptions-item label="已实现盈亏">{{ formatNumber(detailRecord.realized_pnl) }}</a-descriptions-item>
+              <a-descriptions-item label="已实现净盈亏">{{ formatNumber(detailRecord.realized_pnl_net) }}</a-descriptions-item>
+              <a-descriptions-item label="止损价">{{ formatNumber(detailRecord.stop_loss_price) }}</a-descriptions-item>
+              <a-descriptions-item label="追踪止损价">{{ formatNumber(detailRecord.trailing_stop_price) }}</a-descriptions-item>
+            </a-descriptions>
+          </a-card>
+
+          <a-card size="small" title="风控与信号上下文">
+            <a-descriptions :column="2" bordered size="small">
+              <a-descriptions-item label="信号置信度">{{ formatNumber(detailRecord.signal_confidence) }}</a-descriptions-item>
+              <a-descriptions-item label="单笔风险">{{ formatNumber(detailRecord.risk_per_trade) }}</a-descriptions-item>
+              <a-descriptions-item label="交易所">{{ displayText(detailRecord.exchange_type) }}</a-descriptions-item>
+              <a-descriptions-item label="信号原因">{{ displayText(detailRecord.signal_reason) }}</a-descriptions-item>
+            </a-descriptions>
+          </a-card>
+
+          <a-card size="small" title="扩展详情">
+            <a-descriptions :column="1" bordered size="small">
+              <a-descriptions-item label="信号元数据">
+                <pre class="detail-json">{{ formatJson(detailRecord.signal_meta) }}</pre>
+              </a-descriptions-item>
+              <a-descriptions-item label="风控快照">
+                <pre class="detail-json">{{ formatJson(detailRecord.risk_snapshot) }}</pre>
+              </a-descriptions-item>
+              <a-descriptions-item label="交易前持仓">
+                <pre class="detail-json">{{ formatJson(detailRecord.position_before) }}</pre>
+              </a-descriptions-item>
+              <a-descriptions-item label="交易后持仓">
+                <pre class="detail-json">{{ formatJson(detailRecord.position_after) }}</pre>
+              </a-descriptions-item>
+              <a-descriptions-item label="单日亏损快照">
+                <pre class="detail-json">{{ formatJson(detailRecord.daily_loss_snapshot) }}</pre>
+              </a-descriptions-item>
+              <a-descriptions-item label="订单原始响应">
+                <pre class="detail-json">{{ formatJson(detailRecord.order_raw) }}</pre>
+              </a-descriptions-item>
+            </a-descriptions>
+          </a-card>
+        </a-space>
+      </template>
+    </a-drawer>
+
+    <a-drawer v-model:open="drawerOpen" title="当前持仓" width="900">
       <a-table :data-source="positions" :columns="positionColumns" row-key="symbol" :pagination="false" :scroll="{ x: 'max-content' }">
         <template #bodyCell="{ column, text }">
           <template v-if="column.key === 'updated_at' || column.key === 'entry_time'">
             {{ formatDateTime(text) }}
           </template>
-          <template v-else-if="column.key === 'entry_price' || column.key === 'amount' || column.key === 'stop_loss'">
-            {{ formatNumber(text) }}
+          <template
+            v-else-if="[
+              'entry_price',
+              'amount',
+              'stop_loss',
+              'initial_stop_loss',
+              'trailing_stop_price',
+              'highest_price',
+              'highest_close',
+            ].includes(String(column.key))"
+          >
+            {{ formatNumber(text as number | null | undefined) }}
           </template>
           <template v-else-if="column.key === 'symbol'">
             {{ formatSymbol(text) }}
@@ -91,19 +212,25 @@
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import dayjs, { type Dayjs } from 'dayjs'
 import 'dayjs/locale/zh-cn'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { fetchStrategyDefinitions } from '@/api/strategies'
-import { fetchPositions, fetchTradeLogFilterOptions, pageTradeLogs } from '@/api/tradeLogs'
+import { fetchSystemSettings } from '@/api/system'
+import { fetchPositions, pageTradeLogs } from '@/api/tradeLogs'
 import type { StrategyDefinition } from '@/types/strategy'
 import type { PositionItem, TradeLogItem } from '@/types/tradeLog'
+import type { TradeMode } from '@/types/system'
 
 dayjs.locale('zh-cn')
 
+const route = useRoute()
 const loading = ref(false)
 const drawerOpen = ref(false)
+const detailOpen = ref(false)
 const rows = ref<TradeLogItem[]>([])
 const positions = ref<PositionItem[]>([])
+const detailRecord = ref<TradeLogItem | null>(null)
 const total = ref(0)
 const offset = ref(0)
 const size = ref(10)
@@ -122,25 +249,41 @@ const resultOptions = [
   { label: '执行失败', value: 'failed' },
 ]
 
-const filters = reactive<{ strategy?: string; side?: string; result?: string; symbol?: string; createdRange: [Dayjs, Dayjs] | [] }>({
+const filters = reactive<{ strategy?: string; side?: string; result?: string; symbol?: string; runId?: number; createdRange: [Dayjs, Dayjs] | [] }>({
   strategy: undefined,
   side: undefined,
   result: undefined,
   symbol: undefined,
+  runId: undefined,
   createdRange: [],
 })
 
 const strategyOptions = computed(() => definitions.value.map((item) => ({ label: item.displayName, value: item.strategyType })))
+const activeRunTip = computed(() => {
+  if (!filters.runId) {
+    return '可结合策略、结果、交易对、运行实例和时间范围排查一次任务运行中的具体交易结果。'
+  }
+  return `当前已按运行实例 ID ${filters.runId} 聚焦查看交易结果。`
+})
 
 const columns = [
   { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 200 },
+  { title: '运行实例 ID', dataIndex: 'run_id', key: 'run_id', width: 120 },
   { title: '策略', dataIndex: 'strategy', key: 'strategy', width: 140 },
   { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
+  { title: '交易方式', dataIndex: 'trade_mode', key: 'trade_mode', width: 120 },
   { title: '方向', dataIndex: 'side', key: 'side', width: 100 },
   { title: '价格', dataIndex: 'market_price', key: 'market_price', width: 120 },
   { title: '数量', dataIndex: 'requested_amount', key: 'requested_amount', width: 120 },
+  { title: '成交价', dataIndex: 'estimated_fill_price', key: 'estimated_fill_price', width: 120 },
+  { title: '手续费', dataIndex: 'estimated_fee', key: 'estimated_fee', width: 120 },
+  { title: '净盈亏', dataIndex: 'realized_pnl_net', key: 'realized_pnl_net', width: 140 },
   { title: '结果', dataIndex: 'result', key: 'result', width: 120 },
-  { title: '原因', dataIndex: 'result_reason', key: 'result_reason', width: 260 },
+  { title: '触发来源', dataIndex: 'trigger_source', key: 'trigger_source', width: 160 },
+  { title: '订单 ID', dataIndex: 'order_id', key: 'order_id', width: 220 },
+  { title: '原因', dataIndex: 'result_reason', key: 'result_reason', width: 280 },
+  { title: '错误信息', dataIndex: 'error_message', key: 'error_message', width: 300 },
+  { title: '操作', key: 'actions', width: 100, fixed: 'right' },
 ]
 
 const positionColumns = [
@@ -150,6 +293,10 @@ const positionColumns = [
   { title: '入场价', dataIndex: 'entry_price', key: 'entry_price', width: 120 },
   { title: '数量', dataIndex: 'amount', key: 'amount', width: 120 },
   { title: '止损', dataIndex: 'stop_loss', key: 'stop_loss', width: 120 },
+  { title: '初始止损', dataIndex: 'initial_stop_loss', key: 'initial_stop_loss', width: 120 },
+  { title: '追踪止损', dataIndex: 'trailing_stop_price', key: 'trailing_stop_price', width: 120 },
+  { title: '最高价', dataIndex: 'highest_price', key: 'highest_price', width: 120 },
+  { title: '最高收盘价', dataIndex: 'highest_close', key: 'highest_close', width: 140 },
   { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 180 },
 ]
 
@@ -165,6 +312,12 @@ function filterSelectOption(input: string, option?: { children?: unknown; value?
   return label.toLowerCase().includes(input.toLowerCase())
 }
 
+function syncRunIdFromRoute() {
+  const rawRunId = route.query.runId
+  const nextRunId = typeof rawRunId === 'string' ? Number(rawRunId) : Number(rawRunId?.[0])
+  filters.runId = Number.isInteger(nextRunId) && nextRunId > 0 ? nextRunId : undefined
+}
+
 function buildPayload() {
   const [createdFrom, createdTo] = filters.createdRange
   return {
@@ -174,6 +327,7 @@ function buildPayload() {
     side: filters.side,
     result: filters.result,
     symbol: filters.symbol,
+    runId: filters.runId,
     createdFrom: createdFrom ? createdFrom.toISOString() : undefined,
     createdTo: createdTo ? createdTo.toISOString() : undefined,
   }
@@ -209,12 +363,65 @@ function formatNumber(value: number | null | undefined) {
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 8 })
 }
 
+function formatRate(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  return `${(Number(value) * 100).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}%`
+}
+
+function formatJson(value: unknown) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  if (typeof value === 'string') {
+    return value.trim() || '-'
+  }
+  if (Array.isArray(value)) {
+    return value.length ? JSON.stringify(value, null, 2) : '[]'
+  }
+  if (typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>).length ? JSON.stringify(value, null, 2) : '{}'
+  }
+  return String(value)
+}
+
 function sideLabel(value: string | null | undefined) {
   return sideOptions.find((item) => item.value === value)?.label || value || '-'
 }
 
 function resultLabel(value: string | null | undefined) {
   return resultOptions.find((item) => item.value === value)?.label || value || '-'
+}
+
+function resolveTradeMode(record: Pick<TradeLogItem, 'trade_mode' | 'sandbox'> | null | undefined): TradeMode {
+  if (record?.trade_mode) {
+    return record.trade_mode
+  }
+  return record?.sandbox ? 'sandbox' : 'live'
+}
+
+function tradeModeLabel(value: TradeMode | null | undefined) {
+  if (value === 'live') {
+    return '真实交易'
+  }
+  if (value === 'sandbox') {
+    return '沙盒交易'
+  }
+  if (value === 'paper') {
+    return '纸上交易'
+  }
+  return value || '-'
+}
+
+function triggerSourceLabel(value: string | null | undefined) {
+  if (value === 'strategy_signal') {
+    return '策略信号'
+  }
+  if (value === 'stop_loss_trigger') {
+    return '止损触发'
+  }
+  return value || '-'
 }
 
 function sideTagColor(value: string | null | undefined) {
@@ -243,6 +450,19 @@ function resultTagColor(value: string | null | undefined) {
   return 'default'
 }
 
+function tradeModeTagColor(value: TradeMode | null | undefined) {
+  if (value === 'live') {
+    return 'red'
+  }
+  if (value === 'sandbox') {
+    return 'gold'
+  }
+  if (value === 'paper') {
+    return 'blue'
+  }
+  return 'default'
+}
+
 async function loadLogs() {
   loading.value = true
   try {
@@ -257,14 +477,19 @@ async function loadLogs() {
 }
 
 async function loadFilterOptions() {
-  const [strategyDefinitions, filterOptions] = await Promise.all([fetchStrategyDefinitions(), fetchTradeLogFilterOptions()])
+  const [strategyDefinitions, settings] = await Promise.all([fetchStrategyDefinitions(), fetchSystemSettings()])
   definitions.value = strategyDefinitions
-  symbolOptions.value = Array.from(new Set(filterOptions.symbols.map((item) => item.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  symbolOptions.value = Array.from(new Set(settings.editable.supportedSymbols.map((item) => item.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 async function loadPositions() {
   positions.value = await fetchPositions()
   drawerOpen.value = true
+}
+
+function openDetail(record: TradeLogItem) {
+  detailRecord.value = record
+  detailOpen.value = true
 }
 
 function handleSearch() {
@@ -278,6 +503,7 @@ function resetFilters() {
   filters.side = undefined
   filters.result = undefined
   filters.symbol = undefined
+  filters.runId = undefined
   filters.createdRange = []
   offset.value = 0
   pagination.current = 1
@@ -289,7 +515,18 @@ function handleTableChange(page: { current?: number }) {
   loadLogs()
 }
 
+watch(
+  () => route.query.runId,
+  () => {
+    syncRunIdFromRoute()
+    offset.value = 0
+    pagination.current = 1
+    loadLogs()
+  },
+)
+
 onMounted(async () => {
+  syncRunIdFromRoute()
   await loadFilterOptions()
   await loadLogs()
 })
@@ -321,8 +558,25 @@ onMounted(async () => {
 }
 
 .filter-item :deep(.ant-select),
-.filter-item :deep(.ant-picker) {
+.filter-item :deep(.ant-picker),
+.filter-item :deep(.ant-input-number) {
   width: 100%;
+}
+
+.cell-text {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.detail-json {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+:deep(.ant-table-thead > tr > th) {
+  white-space: nowrap;
 }
 
 @media (max-width: 1200px) {
