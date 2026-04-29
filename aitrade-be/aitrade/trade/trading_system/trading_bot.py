@@ -4,6 +4,7 @@ from threading import Event
 
 from ...config import config_file
 
+from ..gpt_signal.technical_analyzer import TechnicalAnalyzer
 from ..strategies import create_strategy
 from .market_data_fetcher import MarketDataFetcher
 from .risk_manager import RiskManager
@@ -140,7 +141,7 @@ class TradingBot:
             )
             contexts[timeframe] = self._trim_context_market_data(context_data, decision_ts)
 
-        feeds = self._load_extra_feeds(extra_feeds)
+        feeds = self._load_extra_feeds(extra_feeds, primary_data)
         merged_data = dict(primary_data)
         merged_data['primary'] = primary_data
         merged_data['contexts'] = contexts
@@ -148,7 +149,7 @@ class TradingBot:
         merged_data['decisionTimestamp'] = decision_ts
         return merged_data
 
-    def _load_extra_feeds(self, feed_requirements: list[dict]) -> dict:
+    def _load_extra_feeds(self, feed_requirements: list[dict], primary_data: dict) -> dict:
         feeds = {}
         for requirement in feed_requirements:
             feed_type = str(requirement.get('type') or '').strip()
@@ -157,6 +158,9 @@ class TradingBot:
             try:
                 if feed_type == 'trade_flow':
                     feeds[feed_type] = self._build_trade_flow_feed(requirement)
+                    continue
+                if feed_type == 'indicator':
+                    feeds[feed_type] = self._build_indicator_feed(requirement, primary_data)
                     continue
                 logging.warning('检测到未支持的扩展 feed 类型: %s', feed_type)
                 feeds[feed_type] = {
@@ -291,6 +295,146 @@ class TradingBot:
             'meta': {
                 'lookbackTrades': lookback_trades,
                 'tradeCount': total_count,
+            },
+        }
+
+    def _build_indicator_feed(self, requirement: dict, primary_data: dict) -> dict:
+        params = dict(requirement.get('params') or {})
+        indicator_key = str(params.get('indicator_key') or '').strip().lower()
+        lookback_candles = max(int(params.get('lookback_candles', 100) or 100), 30)
+        period = max(int(params.get('period', 14) or 14), 2)
+        lower_threshold = float(params.get('lower_threshold', 30.0) or 30.0)
+        upper_threshold = float(params.get('upper_threshold', 70.0) or 70.0)
+        confirm_crossover = bool(params.get('confirm_crossover', True))
+        closes = list(primary_data.get('closes') or [])
+        timestamps = list(primary_data.get('timestamps') or [])
+        price = self._to_float(primary_data.get('price')) or 0.0
+        if indicator_key not in {'rsi', 'macd'}:
+            return {
+                'feedType': 'indicator',
+                'available': False,
+                'required': bool(requirement.get('required')),
+                'reason': f'暂不支持的 indicator_key: {indicator_key or "空值"}',
+                'payload': {},
+                'meta': params,
+            }
+        if len(closes) < lookback_candles:
+            return {
+                'feedType': 'indicator',
+                'available': False,
+                'required': bool(requirement.get('required')),
+                'reason': f'indicator 所需K线不足，至少需要 {lookback_candles} 根',
+                'payload': {},
+                'meta': {
+                    **params,
+                    'currentHistory': len(closes),
+                },
+            }
+        latest_timestamp = int(timestamps[-1]) if timestamps else None
+        closes_window = closes[-lookback_candles:]
+        as_of = self._timestamp_ms_to_iso(latest_timestamp)
+        if indicator_key == 'rsi':
+            if len(closes_window) < period + 1:
+                return {
+                    'feedType': 'indicator',
+                    'available': False,
+                    'required': bool(requirement.get('required')),
+                    'reason': f'RSI 所需K线不足，至少需要 {period + 1} 根',
+                    'payload': {},
+                    'meta': {
+                        **params,
+                        'currentHistory': len(closes_window),
+                    },
+                }
+            rsi_values = TechnicalAnalyzer.compute_rsi(closes_window, period=period)
+            rsi_value = float(rsi_values[-1])
+            rsi_analysis = TechnicalAnalyzer.analyze_rsi(rsi_value)
+            bias = 'hold'
+            score = 0.0
+            reason = str(rsi_analysis.get('details') or 'RSI 未形成明显倾向')
+            if rsi_value <= lower_threshold:
+                bias = 'buy'
+                score = float(rsi_analysis.get('strength') or 0.0)
+                reason = f'RSI {rsi_value:.1f} 跌入低阈值区域'
+            elif rsi_value >= upper_threshold:
+                bias = 'sell'
+                score = float(rsi_analysis.get('strength') or 0.0)
+                reason = f'RSI {rsi_value:.1f} 升至高阈值区域'
+            return {
+                'feedType': 'indicator',
+                'available': True,
+                'required': bool(requirement.get('required')),
+                'reason': 'RSI 指标计算成功',
+                'asOf': as_of,
+                'payload': {
+                    'indicator_key': 'rsi',
+                    'timeframe': str(params.get('primary_timeframe') or ''),
+                    'bias': bias,
+                    'score': score,
+                    'confidence': score,
+                    'reason': reason,
+                    'values': {
+                        'rsi': rsi_value,
+                        'lower_threshold': lower_threshold,
+                        'upper_threshold': upper_threshold,
+                    },
+                    'latest_price': price,
+                    'latest_timestamp': latest_timestamp,
+                },
+                'meta': {
+                    **params,
+                    'condition': rsi_analysis.get('condition'),
+                },
+            }
+
+        macd_analysis, macd_line, signal_line, macd_histogram = TechnicalAnalyzer.analyze_macd(closes_window)
+        bias = 'hold'
+        score = 0.0
+        reason = str(macd_analysis.get('details') or 'MACD 未形成明显倾向')
+        crossover = str(macd_analysis.get('crossover') or 'none')
+        trend = str(macd_analysis.get('trend') or 'neutral')
+        momentum = float(macd_analysis.get('momentum') or 0.0)
+        if confirm_crossover:
+            if crossover == 'golden':
+                bias = 'buy'
+                score = momentum
+            elif crossover == 'death':
+                bias = 'sell'
+                score = momentum
+        else:
+            if trend == 'bullish' and float(macd_histogram) > 0:
+                bias = 'buy'
+                score = momentum
+            elif trend == 'bearish' and float(macd_histogram) < 0:
+                bias = 'sell'
+                score = momentum
+        return {
+            'feedType': 'indicator',
+            'available': True,
+            'required': bool(requirement.get('required')),
+            'reason': 'MACD 指标计算成功',
+            'asOf': as_of,
+            'payload': {
+                'indicator_key': 'macd',
+                'timeframe': str(params.get('primary_timeframe') or ''),
+                'bias': bias,
+                'score': score,
+                'confidence': score,
+                'reason': reason,
+                'values': {
+                    'macd_line': float(macd_line),
+                    'macd_signal': float(signal_line),
+                    'macd_histogram': float(macd_histogram),
+                    'trend': trend,
+                    'crossover': crossover,
+                },
+                'latest_price': price,
+                'latest_timestamp': latest_timestamp,
+            },
+            'meta': {
+                **params,
+                'trend': trend,
+                'crossover': crossover,
             },
         }
 

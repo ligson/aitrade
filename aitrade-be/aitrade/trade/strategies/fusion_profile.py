@@ -169,6 +169,13 @@ def _normalize_structured_fusion_config(source: dict[str, Any]) -> dict[str, Any
         raise ValidationError('decisionPolicy.mode 当前仅支持 weighted_score')
     normalized['decisionPolicy']['mode'] = mode
 
+    enabled_indicator_nodes = [
+        item for item in normalized['signalSourceNodes']
+        if bool(item.get('enabled', True)) and str(item.get('sourceType') or '').strip() == 'indicator'
+    ]
+    if len(enabled_indicator_nodes) > 1:
+        raise ValidationError('融合策略第一阶段最多只能启用一个 indicator 信号源节点')
+
     enabled_node_count = sum(1 for item in normalized['klineNodes'] if bool(item.get('enabled', True))) + sum(
         1 for item in normalized['signalSourceNodes'] if bool(item.get('enabled', True))
     )

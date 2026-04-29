@@ -74,20 +74,62 @@
           </a-descriptions>
 
           <a-card v-if="tradeTask.currentRun" size="small" title="当前运行快照">
-            <a-descriptions :column="2" bordered size="small">
-              <a-descriptions-item label="配置名称">{{ tradeTask.currentRun.profileName }}</a-descriptions-item>
-              <a-descriptions-item label="策略配置 ID">{{ tradeTask.currentRun.strategyProfileId ?? '-' }}</a-descriptions-item>
-              <a-descriptions-item label="交易对">{{ tradeTask.currentRun.symbol }}</a-descriptions-item>
-              <a-descriptions-item label="周期">{{ tradeTask.currentRun.timeframe }}</a-descriptions-item>
-              <a-descriptions-item label="模式">{{ tradeModeLabel(resolveTradeMode(tradeTask.currentRun)) }}</a-descriptions-item>
-              <a-descriptions-item label="K线数量">{{ tradeTask.currentRun.tradeLimit }}</a-descriptions-item>
-              <a-descriptions-item label="手续费率">{{ formatRate(tradeTask.currentRun.feeRate) }}</a-descriptions-item>
-              <a-descriptions-item label="滑点率">{{ formatRate(tradeTask.currentRun.slippageRate) }}</a-descriptions-item>
-              <a-descriptions-item label="单日亏损停机">{{ tradeTask.currentRun.dailyLossStopEnabled ? '已启用' : '关闭' }}</a-descriptions-item>
-              <a-descriptions-item label="单日亏损阈值">{{ formatNumber(tradeTask.currentRun.dailyLossStopThreshold) }}</a-descriptions-item>
-              <a-descriptions-item label="策略类型">{{ strategyTypeLabel(tradeTask.currentRun.strategyType) }}</a-descriptions-item>
-              <a-descriptions-item label="创建人">{{ tradeTask.currentRun.createdBy }}</a-descriptions-item>
-            </a-descriptions>
+            <a-space direction="vertical" size="middle" style="width: 100%">
+              <a-descriptions :column="2" bordered size="small">
+                <a-descriptions-item label="配置名称">{{ tradeTask.currentRun.profileName }}</a-descriptions-item>
+                <a-descriptions-item label="策略配置 ID">{{ tradeTask.currentRun.strategyProfileId ?? '-' }}</a-descriptions-item>
+                <a-descriptions-item label="交易对">{{ tradeTask.currentRun.symbol }}</a-descriptions-item>
+                <a-descriptions-item label="周期">{{ tradeTask.currentRun.timeframe }}</a-descriptions-item>
+                <a-descriptions-item label="模式">{{ tradeModeLabel(resolveTradeMode(tradeTask.currentRun)) }}</a-descriptions-item>
+                <a-descriptions-item label="K线数量">{{ tradeTask.currentRun.tradeLimit }}</a-descriptions-item>
+                <a-descriptions-item label="手续费率">{{ formatRate(tradeTask.currentRun.feeRate) }}</a-descriptions-item>
+                <a-descriptions-item label="滑点率">{{ formatRate(tradeTask.currentRun.slippageRate) }}</a-descriptions-item>
+                <a-descriptions-item label="单日亏损停机">{{ tradeTask.currentRun.dailyLossStopEnabled ? '已启用' : '关闭' }}</a-descriptions-item>
+                <a-descriptions-item label="单日亏损阈值">{{ formatNumber(tradeTask.currentRun.dailyLossStopThreshold) }}</a-descriptions-item>
+                <a-descriptions-item label="策略类型">{{ strategyTypeLabel(tradeTask.currentRun.strategyType) }}</a-descriptions-item>
+                <a-descriptions-item label="创建人">{{ tradeTask.currentRun.createdBy }}</a-descriptions-item>
+              </a-descriptions>
+
+              <a-alert
+                v-if="currentRunSignalSourceSnapshots.length"
+                type="info"
+                show-icon
+                message="这里展示启动时冻结的信号源快照。"
+                description="当前运行中的任务会持续使用这些参数；后续再改信号源配置或融合策略，不会自动影响本次运行。"
+              />
+              <a-table
+                v-if="currentRunSignalSourceSnapshots.length"
+                :data-source="currentRunSignalSourceSnapshots"
+                :columns="signalSourceSnapshotColumns"
+                :row-key="signalSourceSnapshotRowKey"
+                :pagination="false"
+                size="small"
+                :scroll="{ x: 'max-content' }"
+              >
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'sourceType'">
+                    {{ signalSourceTypeLabel(record.sourceType) }}
+                  </template>
+                  <template v-else-if="column.key === 'runtimeSupported'">
+                    <a-tag :color="record.sourceType === 'indicator' || record.sourceType === 'trade_flow' ? 'blue' : 'default'">
+                      {{ record.sourceType === 'indicator' || record.sourceType === 'trade_flow' ? '已接入运行时' : '预留' }}
+                    </a-tag>
+                  </template>
+                  <template v-else-if="column.key === 'required'">
+                    <a-tag :color="record.required ? 'orange' : 'default'">{{ record.required ? '必需' : '可选' }}</a-tag>
+                  </template>
+                  <template v-else-if="column.key === 'weight'">
+                    {{ formatNumber(record.weight) }}
+                  </template>
+                  <template v-else-if="column.key === 'description'">
+                    <div class="cell-text">{{ record.description || '-' }}</div>
+                  </template>
+                  <template v-else-if="column.key === 'thresholds' || column.key === 'params'">
+                    <pre class="snapshot-json">{{ formatJsonLike(record[column.key]) }}</pre>
+                  </template>
+                </template>
+              </a-table>
+            </a-space>
           </a-card>
 
           <a-alert v-if="tradeTask.lastError" type="error" show-icon :message="tradeTask.lastError" />
@@ -107,6 +149,17 @@ import { fetchStrategyProfiles } from '@/api/strategies'
 import { fetchTradeTaskProfiles, fetchTradeTaskStatus, startTradeTask, stopTradeTask } from '@/api/system'
 import type { StrategyProfile } from '@/types/strategy'
 import type { TradeMode, TradeTaskProfile, TradeTaskStatus } from '@/types/system'
+
+type SignalSourceSnapshotItem = {
+  signalSourceProfileId: number | null
+  sourceType: string
+  name: string
+  required: boolean
+  weight: number | null
+  thresholds: Record<string, unknown>
+  params: Record<string, unknown>
+  description: string
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -146,8 +199,25 @@ const tradeTask = reactive<TradeTaskStatus>({
 })
 
 const activeStatuses = new Set(['starting', 'running', 'stop_requested'])
+const signalSourceSnapshotColumns = [
+  { title: '名称', dataIndex: 'name', key: 'name', width: 180 },
+  { title: '类型', dataIndex: 'sourceType', key: 'sourceType', width: 140 },
+  { title: '运行时', key: 'runtimeSupported', width: 120 },
+  { title: '必需性', dataIndex: 'required', key: 'required', width: 100 },
+  { title: '权重', dataIndex: 'weight', key: 'weight', width: 100 },
+  { title: '节点阈值', dataIndex: 'thresholds', key: 'thresholds', width: 260 },
+  { title: '冻结参数', dataIndex: 'params', key: 'params', width: 340 },
+  { title: '描述', dataIndex: 'description', key: 'description', width: 260 },
+]
 const enabledProfiles = computed(() => profiles.value.filter((item) => item.enabled))
 const selectedProfile = computed(() => enabledProfiles.value.find((item) => item.id === selectedProfileId.value) || null)
+const currentRunSignalSourceSnapshots = computed<SignalSourceSnapshotItem[]>(() => {
+  const snapshot = tradeTask.currentRun?.snapshot
+  const rawItems = Array.isArray(snapshot?.signalSourceSnapshots) ? snapshot.signalSourceSnapshots : []
+  return rawItems
+    .map((item) => normalizeSignalSourceSnapshot(item))
+    .filter((item): item is SignalSourceSnapshotItem => item !== null)
+})
 const startConfirmTitle = computed(() => {
   const tradeMode = resolveTradeMode(selectedProfile.value)
   const modeLabel = tradeModeLabel(tradeMode)
@@ -185,6 +255,53 @@ function formatRate(value: number | null | undefined) {
     return '-'
   }
   return `${(Number(value) * 100).toLocaleString('zh-CN', { maximumFractionDigits: 4 })}%`
+}
+
+function formatJsonLike(value: unknown) {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  if (typeof value === 'string') {
+    return value.trim() || '-'
+  }
+  if (Array.isArray(value)) {
+    return value.length ? JSON.stringify(value, null, 2) : '[]'
+  }
+  if (typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>).length ? JSON.stringify(value, null, 2) : '{}'
+  }
+  return String(value)
+}
+
+function signalSourceTypeLabel(value: string) {
+  if (value === 'trade_flow') {
+    return 'trade_flow'
+  }
+  if (value === 'indicator') {
+    return 'indicator'
+  }
+  return value || '-'
+}
+
+function signalSourceSnapshotRowKey(record: SignalSourceSnapshotItem) {
+  return `${record.signalSourceProfileId || record.name}-${record.sourceType}`
+}
+
+function normalizeSignalSourceSnapshot(value: unknown): SignalSourceSnapshotItem | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const item = value as Record<string, unknown>
+  return {
+    signalSourceProfileId: typeof item.signalSourceProfileId === 'number' ? item.signalSourceProfileId : null,
+    sourceType: String(item.sourceType || ''),
+    name: String(item.name || '-'),
+    required: Boolean(item.required),
+    weight: typeof item.weight === 'number' ? item.weight : null,
+    thresholds: item.thresholds && typeof item.thresholds === 'object' && !Array.isArray(item.thresholds) ? (item.thresholds as Record<string, unknown>) : {},
+    params: item.params && typeof item.params === 'object' && !Array.isArray(item.params) ? (item.params as Record<string, unknown>) : {},
+    description: String(item.description || ''),
+  }
 }
 
 function statusLabel(value: string) {
@@ -416,5 +533,21 @@ onBeforeUnmount(() => {
   color: rgba(0, 0, 0, 0.88);
   font-weight: 500;
   word-break: break-word;
+}
+
+.cell-text {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.snapshot-json {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+:deep(.ant-table-thead > tr > th) {
+  white-space: nowrap;
 }
 </style>

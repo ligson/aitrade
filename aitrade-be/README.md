@@ -171,6 +171,7 @@ bash stop.sh
 - `btc_spot_breakout`：复用 BTC 单周期突破策略的核心判断，作为 K 线融合节点输出倾向
 - `btc_spot_trend_breakout`：复用 `1h + 4h` 趋势突破策略的核心判断，作为 K 线融合节点输出倾向
 - `trade_flow`：基于近期成交的买卖盘占比与名义金额失衡度打分的信号源节点
+- `indicator`：基于主周期 K 线计算指标并输出倾向的信号源节点，当前已支持 `rsi / macd`
 
 同时系统已新增独立信号源档案，当前支持：
 
@@ -180,7 +181,7 @@ bash stop.sh
 - `market_activity`
 - `external_signal`
 
-其中只有 `trade_flow` 在第一阶段已接入运行时，其余类型先提供配置落点与详情展示。
+其中 `trade_flow` 与 `indicator` 在第一阶段已接入运行时；`indicator` 当前约束为“每个融合策略最多启用一个 indicator 节点，且主周期必须与交易任务周期一致”。其余类型先提供配置落点与详情展示。
 
 当前行为与约束：
 

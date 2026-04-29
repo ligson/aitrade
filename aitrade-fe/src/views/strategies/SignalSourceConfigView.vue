@@ -1,6 +1,12 @@
 <template>
   <a-card class="page-card">
     <a-space direction="vertical" size="middle" style="width: 100%">
+      <a-alert
+        type="info"
+        show-icon
+        message="信号源配置用于沉淀可复用的融合节点输入。"
+        description="当前已接入运行时的信号源包括 trade_flow 与 indicator；其中 indicator 第一阶段支持 rsi / macd，且每个融合策略最多启用一个 indicator 节点，主周期必须与交易任务周期一致。"
+      />
       <div class="page-toolbar">
         <a-button type="primary" @click="openCreate">新增信号源</a-button>
       </div>

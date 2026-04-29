@@ -414,7 +414,12 @@ class TradeTaskService:
             if strategy_profile.strategy_type == 'spot_multi_signal_fusion':
                 fusion_config_snapshot = normalize_fusion_strategy_profile_config(normalized_params)
                 kline_node_snapshots = self._build_kline_node_snapshots(session, fusion_config_snapshot)
-                signal_source_snapshots = self._build_signal_source_snapshots(session, fusion_config_snapshot, runtime_defaults_snapshot)
+                signal_source_snapshots = self._build_signal_source_snapshots(
+                    session,
+                    fusion_config_snapshot,
+                    runtime_defaults_snapshot,
+                    profile.timeframe,
+                )
             snapshot = {
                 'profileId': profile.id,
                 'profileName': profile.name,
@@ -746,8 +751,15 @@ class TradeTaskService:
             })
         return snapshots
 
-    def _build_signal_source_snapshots(self, session, fusion_config: dict[str, Any], runtime_defaults: dict[str, Any]) -> list[dict[str, Any]]:
+    def _build_signal_source_snapshots(
+        self,
+        session,
+        fusion_config: dict[str, Any],
+        runtime_defaults: dict[str, Any],
+        trade_task_timeframe: str,
+    ) -> list[dict[str, Any]]:
         snapshots: list[dict[str, Any]] = []
+        indicator_source_count = 0
         for item in list(fusion_config.get('signalSourceNodes') or []):
             if not bool(item.get('enabled', True)):
                 continue
@@ -768,6 +780,18 @@ class TradeTaskService:
                     **params,
                     **dict(item.get('params') or {}),
                 }
+            elif profile.source_type == 'indicator':
+                indicator_source_count += 1
+                if indicator_source_count > 1:
+                    raise ValidationError('融合策略第一阶段最多只能启用一个 indicator 信号源节点')
+                merged_params = self._normalize_indicator_source_params(
+                    {
+                        **params,
+                        **dict(item.get('params') or {}),
+                    },
+                    trade_task_timeframe,
+                    profile.name,
+                )
             snapshots.append({
                 'signalSourceProfileId': profile.id,
                 'sourceType': profile.source_type,
@@ -1176,6 +1200,57 @@ class TradeTaskService:
                 with self.engine.begin() as connection:
                     for name, ddl in missing_columns.items():
                         connection.execute(text(f'ALTER TABLE trade_task_runs ADD COLUMN {name} {ddl}'))
+
+    def _normalize_indicator_source_params(
+        self,
+        params: dict[str, Any],
+        trade_task_timeframe: str,
+        profile_name: str,
+    ) -> dict[str, Any]:
+        indicator_key = str(params.get('indicator_key') or '').strip().lower()
+        if indicator_key not in {'rsi', 'macd'}:
+            raise ValidationError(
+                f'指标信号源 {profile_name} 当前仅支持 rsi 或 macd，收到: {indicator_key or "空值"}'
+            )
+        indicator_timeframe = self._normalize_timeframe(str(params.get('primary_timeframe') or '').strip())
+        if self._timeframe_to_minutes(indicator_timeframe) != self._timeframe_to_minutes(trade_task_timeframe):
+            raise ValidationError(
+                f'指标信号源 {profile_name} 的主周期必须与交易任务周期一致: signal_source={indicator_timeframe} task={trade_task_timeframe}'
+            )
+        lookback_candles = int(params.get('lookback_candles') or 0)
+        period = int(params.get('period') or 0)
+        lower_threshold = float(params.get('lower_threshold') or 0)
+        upper_threshold = float(params.get('upper_threshold') or 0)
+        breakout_lookback = int(params.get('breakout_lookback') or 0)
+        volume_multiplier = float(params.get('volume_multiplier') or 0)
+        if lookback_candles <= 0:
+            raise ValidationError(f'指标信号源 {profile_name} 的回看K线数必须大于 0')
+        if period <= 1:
+            raise ValidationError(f'指标信号源 {profile_name} 的指标周期必须大于 1')
+        if lookback_candles < period + 5:
+            raise ValidationError(f'指标信号源 {profile_name} 的回看K线数至少要比指标周期多 5 根')
+        if lower_threshold < 0 or lower_threshold > 100:
+            raise ValidationError(f'指标信号源 {profile_name} 的低阈值必须在 0 到 100 之间')
+        if upper_threshold < 0 or upper_threshold > 100:
+            raise ValidationError(f'指标信号源 {profile_name} 的高阈值必须在 0 到 100 之间')
+        if lower_threshold >= upper_threshold:
+            raise ValidationError(f'指标信号源 {profile_name} 的低阈值必须小于高阈值')
+        if breakout_lookback <= 1:
+            raise ValidationError(f'指标信号源 {profile_name} 的突破回看窗口必须大于 1')
+        if volume_multiplier <= 0:
+            raise ValidationError(f'指标信号源 {profile_name} 的放量倍率必须大于 0')
+        return {
+            **params,
+            'indicator_key': indicator_key,
+            'primary_timeframe': trade_task_timeframe,
+            'lookback_candles': lookback_candles,
+            'period': period,
+            'lower_threshold': lower_threshold,
+            'upper_threshold': upper_threshold,
+            'confirm_crossover': bool(params.get('confirm_crossover', True)),
+            'breakout_lookback': breakout_lookback,
+            'volume_multiplier': volume_multiplier,
+        }
 
     @staticmethod
     def _normalize_trade_mode_value(trade_mode: str | None, sandbox_trade: bool = True) -> str:

@@ -19,6 +19,10 @@ const SystemAISettingsView = () => import('@/views/system/SystemAISettingsView.v
 const SystemTradeSettingsView = () => import('@/views/system/SystemTradeSettingsView.vue')
 const SystemDataSettingsView = () => import('@/views/system/SystemDataSettingsView.vue')
 const SystemLogView = () => import('@/views/system/SystemLogView.vue')
+const HelpCenterView = () => import('@/views/help/HelpCenterView.vue')
+const HelpGettingStartedView = () => import('@/views/help/HelpGettingStartedView.vue')
+const HelpTerminologyView = () => import('@/views/help/HelpTerminologyView.vue')
+const HelpStrategyPrinciplesView = () => import('@/views/help/HelpStrategyPrinciplesView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -164,6 +168,42 @@ const router = createRouter({
           meta: {
             title: '策略回测',
             breadcrumb: ['策略中心', '策略回测'],
+          },
+        },
+        {
+          path: 'help-center',
+          name: 'help-center',
+          component: HelpCenterView,
+          meta: {
+            title: '帮助总览',
+            breadcrumb: ['帮助中心', '帮助总览'],
+          },
+        },
+        {
+          path: 'help-getting-started',
+          name: 'help-getting-started',
+          component: HelpGettingStartedView,
+          meta: {
+            title: '系统使用指南',
+            breadcrumb: ['帮助中心', '系统使用指南'],
+          },
+        },
+        {
+          path: 'help-terminology',
+          name: 'help-terminology',
+          component: HelpTerminologyView,
+          meta: {
+            title: '量化术语',
+            breadcrumb: ['帮助中心', '量化术语'],
+          },
+        },
+        {
+          path: 'help-strategy-principles',
+          name: 'help-strategy-principles',
+          component: HelpStrategyPrinciplesView,
+          meta: {
+            title: '策略原则',
+            breadcrumb: ['帮助中心', '策略原则'],
           },
         },
       ],

@@ -31,7 +31,19 @@
 
     <a-card size="small" title="信号源节点">
       <a-space direction="vertical" size="middle" style="width: 100%">
-        <a-alert type="info" show-icon message="可选择已有信号源配置参与融合。" description="第一阶段实际接通 trade_flow，其他类型先提供配置落点。" />
+        <a-alert
+          type="info"
+          show-icon
+          message="可选择已有信号源配置参与融合。"
+          description="当前已接入运行时的信号源包括 trade_flow 与 indicator；其中 indicator 第一阶段支持 rsi / macd，每个融合策略最多启用一个 indicator 节点，且交易任务周期必须与 indicator 的主周期一致。"
+        />
+        <a-alert
+          v-if="enabledIndicatorCount > 1"
+          type="warning"
+          show-icon
+          message="当前已启用多个 indicator 节点"
+          description="第一阶段每个融合策略最多只能启用一个 indicator 信号源节点；如果继续保留多个，启动交易任务时会被拒绝。"
+        />
         <div v-for="(node, index) in localValue.signalSourceNodes" :key="`signal-${index}`" class="builder-item">
           <div class="builder-item-row signal-row">
             <a-switch :checked="node.enabled" @change="updateSignalNode(index, 'enabled', $event)" />
@@ -55,6 +67,7 @@
               <a-input-number :value="node.thresholds.imbalance_threshold" :min="0.01" :max="1" :step="0.01" style="width: 100%" @change="updateSignalThreshold(index, 'imbalance_threshold', Number($event || 0))" />
             </a-form-item>
           </div>
+          <div class="builder-item-meta">{{ signalNodeSummary(node) }}</div>
         </div>
         <a-button type="dashed" block @click="appendSignalNode">新增信号源节点</a-button>
       </a-space>
@@ -87,6 +100,7 @@
       <a-descriptions :column="1" size="small" bordered>
         <a-descriptions-item label="K 线节点数">{{ enabledKlineCount }}</a-descriptions-item>
         <a-descriptions-item label="信号源节点数">{{ enabledSignalCount }}</a-descriptions-item>
+        <a-descriptions-item label="indicator 节点数">{{ enabledIndicatorCount }}</a-descriptions-item>
         <a-descriptions-item label="最少可用节点数">{{ localValue.filters.min_available_nodes }}</a-descriptions-item>
         <a-descriptions-item label="固定周期约束">{{ requires1h ? '包含固定 1h 节点' : '无' }}</a-descriptions-item>
       </a-descriptions>
@@ -113,10 +127,26 @@ const emit = defineEmits<{
 const localValue = computed(() => props.modelValue)
 const enabledKlineCount = computed(() => localValue.value.klineNodes.filter((item) => item.enabled).length)
 const enabledSignalCount = computed(() => localValue.value.signalSourceNodes.filter((item) => item.enabled).length)
+const enabledIndicatorCount = computed(() => localValue.value.signalSourceNodes.filter((item) => item.enabled && item.sourceType === 'indicator').length)
 const requires1h = computed(() => localValue.value.klineNodes.some((item) => item.enabled && item.requires_1h_timeframe))
 
 function updateValue(nextValue: FusionStrategyParams) {
   emit('update:modelValue', nextValue)
+}
+
+function signalNodeSummary(node: FusionSignalSourceNode) {
+  if (!node.sourceType) {
+    return '未选择信号源。'
+  }
+  if (node.sourceType === 'trade_flow') {
+    return 'trade_flow 已接入运行时；下方阈值用于解释买卖盘占比与成交额失衡结果。'
+  }
+  if (node.sourceType === 'indicator') {
+    const indicatorKey = String(node.params?.indicator_key || '').trim().toUpperCase() || '未设置指标'
+    const timeframe = String(node.params?.primary_timeframe || '').trim() || '未设置主周期'
+    return `indicator 已接入运行时；当前指标 ${indicatorKey}，主周期 ${timeframe}；第一阶段每个融合策略最多启用一个 indicator 节点，且交易任务周期必须与这里的主周期一致。`
+  }
+  return `${node.sourceType} 当前仍建议先确认运行时支持情况。`
 }
 
 function appendKlineNode() {

@@ -2,6 +2,15 @@
 
 所有有意义的仓库变更都应记录在这里。
 
+## 2026-04-29
+
+- 打通 `indicator` 信号源第一阶段运行时链路：信号源注册表正式将 `indicator` 标记为 `runtimeSupported=true`，并扩展 `indicator_key / primary_timeframe / lookback_candles / period / lower_threshold / upper_threshold / confirm_crossover` 等参数 schema，页面可直接维护可运行的指标型信号源档案。
+- 交易任务启动快照新增 `indicator` 冻结与校验：融合策略启用 `indicator` 节点时，会在 run snapshot 中固化合并后的参数，并在启动前校验“每个融合策略最多一个 indicator 节点、主周期必须与任务周期一致、当前仅支持 rsi/macd”等约束，避免运行中出现静默降级。
+- `TradingBot` 与 `spot_multi_signal_fusion` 新增 indicator 扩展 feed：运行时直接复用本轮主周期 K 线构造 `indicator` feed，并把 `rsi / macd` 解释结果接入融合节点聚合，现货多源融合策略现已支持把 `indicator` 作为真实信号源参与决策。
+- 后端 README 同步更新 indicator 能力边界：明确第一阶段已接入运行时的信号源为 `trade_flow` 与 `indicator`，其中 `indicator` 当前支持 `rsi / macd`，且仅允许单节点、同周期接入。
+- 前端同步补齐 indicator 展示与排障视图：`信号源配置`、`融合策略编辑器`、`交易任务控制`、`交易日志` 页面统一提示 indicator 第一阶段约束，并新增运行快照信号源冻结展示与融合节点结果结构化查看，便于联调和排障。
+- 新增普通用户可见的 `帮助中心` 菜单分组与 4 个帮助页：包含帮助总览、系统使用指南、量化术语、策略原则，帮助新用户理解页面使用流程、常见量化英文/编码术语，以及策略、执行与风控之间的基本关系。
+
 ## 2026-04-28
 
 - 修复交易日志记录 `symbol` 落库不稳定的问题：交易执行链路改为显式使用当前执行交易对写入 `trade_records`，避免页面出现“交易对”为空。

@@ -134,6 +134,17 @@ const menuGroups: MenuGroup[] = [
       { key: 'users', title: '用户维护', icon: TeamOutlined, routePath: '/users', adminOnly: true },
     ],
   },
+  {
+    key: 'help-center',
+    title: '帮助中心',
+    icon: FileTextOutlined,
+    children: [
+      { key: 'help-center', title: '帮助总览', icon: FileTextOutlined, routePath: '/help-center' },
+      { key: 'help-getting-started', title: '系统使用指南', icon: FileTextOutlined, routePath: '/help-getting-started' },
+      { key: 'help-terminology', title: '量化术语', icon: FileTextOutlined, routePath: '/help-terminology' },
+      { key: 'help-strategy-principles', title: '策略原则', icon: FileTextOutlined, routePath: '/help-strategy-principles' },
+    ],
+  },
 ]
 
 // adminOnly 只控制菜单展示层，真正的接口权限仍以后端校验为准。

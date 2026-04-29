@@ -21,6 +21,7 @@ class SpotMultiSignalFusionStrategy(BaseStrategy):
         context_timeframes = []
         extra_feeds = []
         trade_flow_config = dict(self.market_feeds_config.get('trade_flow') or {})
+        indicator_node = self._get_indicator_node()
         if self._is_kline_trend_breakout_node_enabled():
             context_timeframes.append('4h')
         if self._is_trade_flow_enabled(trade_flow_config):
@@ -32,6 +33,16 @@ class SpotMultiSignalFusionStrategy(BaseStrategy):
                     'lookback_trades': int(trade_flow_config.get('lookback_trades', 200) or 200),
                 },
             })
+        if indicator_node is not None:
+            extra_feeds.append({
+                'type': 'indicator',
+                'required': bool(indicator_node.get('required', False)),
+                'params': {
+                    **dict(indicator_node.get('params') or {}),
+                    'signal_source_profile_id': indicator_node.get('signalSourceProfileId'),
+                    'node_name': str(indicator_node.get('name') or 'indicator_node'),
+                },
+            })
         return {
             'primary_timeframe': None,
             'context_timeframes': context_timeframes,
@@ -40,6 +51,7 @@ class SpotMultiSignalFusionStrategy(BaseStrategy):
 
     def get_required_history(self) -> int:
         histories = [int(self.config.get('shared_atr_period', 14)) + 2, 35]
+        indicator_node = self._get_indicator_node()
         if bool(self.config.get('enable_technical_node', True)):
             histories.append(max(
                 int(self.config.get('technical_ema_period', 55)) + 2,
@@ -57,6 +69,8 @@ class SpotMultiSignalFusionStrategy(BaseStrategy):
                 int(DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG['breakout_lookback']) + 2,
                 int(DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG['volume_ma_period']) + 2,
             ))
+        if indicator_node is not None:
+            histories.append(self._get_indicator_required_history(indicator_node))
         return max(histories)
 
     def get_required_context_history(self) -> Dict[str, int]:
@@ -113,6 +127,14 @@ class SpotMultiSignalFusionStrategy(BaseStrategy):
             trade_flow_node = self._build_trade_flow_node_signal(market_data.get('feeds', {}), current_price)
             node_results.append(trade_flow_node)
             if trade_flow_node['available']:
+                available_nodes += 1
+
+        indicator_node_config = self._get_indicator_node()
+        if indicator_node_config is not None:
+            enabled_nodes += 1
+            indicator_node = self._build_indicator_node_signal(market_data.get('feeds', {}), current_price, indicator_node_config)
+            node_results.append(indicator_node)
+            if indicator_node['available']:
                 available_nodes += 1
 
         if bool(self.config.get('enable_kline_breakout_node', False)):
@@ -394,6 +416,46 @@ class SpotMultiSignalFusionStrategy(BaseStrategy):
             },
         }
 
+    def _build_indicator_node_signal(
+        self,
+        feeds: Dict[str, Any],
+        current_price: float,
+        indicator_node: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        payload = dict((feeds or {}).get('indicator') or {})
+        node_name = str(indicator_node.get('name') or 'indicator_node')
+        node_weight = float(indicator_node.get('weight', 0.4))
+        if not bool(payload.get('available')):
+            logging.info('融合策略未获取到可用 indicator feed，节点降级为缺失: node=%s', node_name)
+            return {
+                'name': node_name,
+                'enabled': True,
+                'available': False,
+                'weight': node_weight,
+                'bias': 'hold',
+                'score': 0.0,
+                'confidence': 0.0,
+                'reason': str(payload.get('reason') or 'indicator 数据缺失'),
+                'meta': payload,
+            }
+
+        indicator_payload = dict(payload.get('payload') or {})
+        latest_price = float(indicator_payload.get('latest_price') or current_price)
+        return {
+            'name': node_name,
+            'enabled': True,
+            'available': True,
+            'weight': node_weight,
+            'bias': str(indicator_payload.get('bias') or 'hold'),
+            'score': float(indicator_payload.get('score') or 0.0),
+            'confidence': float(indicator_payload.get('confidence') or 0.0),
+            'reason': str(indicator_payload.get('reason') or 'indicator 未形成明显倾向'),
+            'meta': {
+                **indicator_payload,
+                'latest_price': latest_price,
+            },
+        }
+
     def _build_kline_breakout_node_signal(
         self,
         close_series: pd.Series,
@@ -610,6 +672,24 @@ class SpotMultiSignalFusionStrategy(BaseStrategy):
     def _is_trade_flow_enabled(self, trade_flow_config: Optional[Dict[str, Any]] = None) -> bool:
         config = trade_flow_config if trade_flow_config is not None else dict(self.market_feeds_config.get('trade_flow') or {})
         return bool(self.config.get('enable_trade_flow_node', True)) and bool(config.get('enabled', True))
+
+    def _get_indicator_node(self) -> Optional[Dict[str, Any]]:
+        for item in list(self.config.get('signalSourceNodes') or []):
+            if not bool(item.get('enabled', True)):
+                continue
+            if str(item.get('sourceType') or '').strip() != 'indicator':
+                continue
+            return dict(item)
+        return None
+
+    def _get_indicator_required_history(self, indicator_node: Dict[str, Any]) -> int:
+        params = dict(indicator_node.get('params') or {})
+        lookback_candles = max(int(params.get('lookback_candles', 100) or 100), 30)
+        period = max(int(params.get('period', 14) or 14), 2)
+        indicator_key = str(params.get('indicator_key') or 'rsi').strip().lower()
+        if indicator_key == 'macd':
+            return max(lookback_candles, 35)
+        return max(lookback_candles, period + 5)
 
     def _is_kline_trend_breakout_node_enabled(self) -> bool:
         return bool(self.config.get('enable_kline_trend_breakout_node', False))

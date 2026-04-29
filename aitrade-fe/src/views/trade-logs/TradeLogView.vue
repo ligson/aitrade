@@ -153,7 +153,40 @@
 
           <a-card size="small" title="扩展详情">
             <a-descriptions :column="1" bordered size="small">
-              <a-descriptions-item label="信号元数据">
+              <a-descriptions-item v-if="detailSignalSummaryVisible" label="融合信号概览">
+                <a-descriptions :column="2" bordered size="small">
+                  <a-descriptions-item label="信号分数">{{ formatNumber(detailSignalSummary.signalScore) }}</a-descriptions-item>
+                  <a-descriptions-item label="是否降级">{{ detailSignalSummary.degraded }}</a-descriptions-item>
+                  <a-descriptions-item label="启用节点数">{{ detailSignalSummary.enabledNodeCount }}</a-descriptions-item>
+                  <a-descriptions-item label="可用节点数">{{ detailSignalSummary.availableNodeCount }}</a-descriptions-item>
+                  <a-descriptions-item label="归一化偏多分数">{{ formatNumber(detailSignalSummary.normalizedBuyScore) }}</a-descriptions-item>
+                  <a-descriptions-item label="归一化偏空分数">{{ formatNumber(detailSignalSummary.normalizedSellScore) }}</a-descriptions-item>
+                  <a-descriptions-item label="偏多活跃节点" :span="2">{{ detailSignalSummary.activeBuyNodes }}</a-descriptions-item>
+                  <a-descriptions-item label="偏空活跃节点" :span="2">{{ detailSignalSummary.activeSellNodes }}</a-descriptions-item>
+                </a-descriptions>
+              </a-descriptions-item>
+              <a-descriptions-item v-if="detailNodeSignals.length" label="融合节点结果">
+                <a-table :data-source="detailNodeSignals" :columns="detailNodeSignalColumns" :pagination="false" size="small" :scroll="{ x: 'max-content' }" row-key="name">
+                  <template #bodyCell="{ column, record }">
+                    <template v-if="column.key === 'available'">
+                      <a-tag :color="record.available ? 'green' : 'default'">{{ record.available ? '可用' : '不可用' }}</a-tag>
+                    </template>
+                    <template v-else-if="column.key === 'bias'">
+                      <a-tag :color="signalBiasTagColor(record.bias)">{{ signalBiasLabel(record.bias) }}</a-tag>
+                    </template>
+                    <template v-else-if="['weight', 'score', 'confidence'].includes(String(column.key))">
+                      {{ formatNumber(record[column.key]) }}
+                    </template>
+                    <template v-else-if="column.key === 'reason'">
+                      <div class="cell-text">{{ displayText(record.reason) }}</div>
+                    </template>
+                    <template v-else>
+                      {{ displayText(record[column.key]) }}
+                    </template>
+                  </template>
+                </a-table>
+              </a-descriptions-item>
+              <a-descriptions-item label="信号元数据原文">
                 <pre class="detail-json">{{ formatJson(detailRecord.signal_meta) }}</pre>
               </a-descriptions-item>
               <a-descriptions-item label="风控快照">
@@ -224,6 +257,16 @@ import type { TradeMode } from '@/types/system'
 
 dayjs.locale('zh-cn')
 
+type SignalNodeItem = {
+  name: string
+  available: boolean
+  bias: string
+  weight: number | null
+  score: number | null
+  confidence: number | null
+  reason: string
+}
+
 const route = useRoute()
 const loading = ref(false)
 const drawerOpen = ref(false)
@@ -264,6 +307,49 @@ const activeRunTip = computed(() => {
     return '可结合策略、结果、交易对、运行实例和时间范围排查一次任务运行中的具体交易结果。'
   }
   return `当前已按运行实例 ID ${filters.runId} 聚焦查看交易结果。`
+})
+const detailNodeSignalColumns = [
+  { title: '节点名称', dataIndex: 'name', key: 'name', width: 180 },
+  { title: '可用性', dataIndex: 'available', key: 'available', width: 100 },
+  { title: '偏向', dataIndex: 'bias', key: 'bias', width: 100 },
+  { title: '权重', dataIndex: 'weight', key: 'weight', width: 100 },
+  { title: '评分', dataIndex: 'score', key: 'score', width: 100 },
+  { title: '置信度', dataIndex: 'confidence', key: 'confidence', width: 120 },
+  { title: '原因', dataIndex: 'reason', key: 'reason', width: 320 },
+]
+const detailSignalMeta = computed<Record<string, unknown>>(() => {
+  const value = detailRecord.value?.signal_meta
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+})
+const detailNodeSignals = computed<SignalNodeItem[]>(() => {
+  const rawNodes = Array.isArray(detailSignalMeta.value.node_signals)
+    ? detailSignalMeta.value.node_signals
+    : Array.isArray(detailSignalMeta.value.signal_sources)
+      ? detailSignalMeta.value.signal_sources
+      : []
+  return rawNodes.map((item) => normalizeSignalNode(item)).filter((item): item is SignalNodeItem => item !== null)
+})
+const detailSignalSummary = computed(() => ({
+  signalScore: toOptionalNumber(detailSignalMeta.value.signal_score),
+  degraded: typeof detailSignalMeta.value.degraded === 'boolean' ? (detailSignalMeta.value.degraded ? '是' : '否') : '-',
+  enabledNodeCount: toDisplayCount(detailSignalMeta.value.enabled_node_count),
+  availableNodeCount: toDisplayCount(detailSignalMeta.value.available_node_count),
+  normalizedBuyScore: toOptionalNumber(detailSignalMeta.value.normalized_buy_score),
+  normalizedSellScore: toOptionalNumber(detailSignalMeta.value.normalized_sell_score),
+  activeBuyNodes: formatNameList(detailSignalMeta.value.active_buy_nodes),
+  activeSellNodes: formatNameList(detailSignalMeta.value.active_sell_nodes),
+}))
+const detailSignalSummaryVisible = computed(() => {
+  return [
+    detailSignalSummary.value.signalScore,
+    detailSignalSummary.value.normalizedBuyScore,
+    detailSignalSummary.value.normalizedSellScore,
+  ].some((item) => item !== null)
+    || detailSignalSummary.value.degraded !== '-'
+    || detailSignalSummary.value.enabledNodeCount !== '-'
+    || detailSignalSummary.value.availableNodeCount !== '-'
+    || detailSignalSummary.value.activeBuyNodes !== '-'
+    || detailSignalSummary.value.activeSellNodes !== '-'
 })
 
 const columns = [
@@ -386,6 +472,38 @@ function formatJson(value: unknown) {
   return String(value)
 }
 
+function toOptionalNumber(value: unknown) {
+  return typeof value === 'number' ? value : null
+}
+
+function toDisplayCount(value: unknown) {
+  return typeof value === 'number' ? String(value) : '-'
+}
+
+function formatNameList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return '-'
+  }
+  const items = value.map((item) => String(item || '').trim()).filter(Boolean)
+  return items.length ? items.join('、') : '-'
+}
+
+function normalizeSignalNode(value: unknown): SignalNodeItem | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const item = value as Record<string, unknown>
+  return {
+    name: String(item.name || '-'),
+    available: Boolean(item.available),
+    bias: String(item.bias || 'hold'),
+    weight: typeof item.weight === 'number' ? item.weight : null,
+    score: typeof item.score === 'number' ? item.score : null,
+    confidence: typeof item.confidence === 'number' ? item.confidence : null,
+    reason: String(item.reason || ''),
+  }
+}
+
 function sideLabel(value: string | null | undefined) {
   return sideOptions.find((item) => item.value === value)?.label || value || '-'
 }
@@ -422,6 +540,32 @@ function triggerSourceLabel(value: string | null | undefined) {
     return '止损触发'
   }
   return value || '-'
+}
+
+function signalBiasLabel(value: string | null | undefined) {
+  if (value === 'buy') {
+    return '偏多'
+  }
+  if (value === 'sell') {
+    return '偏空'
+  }
+  if (value === 'hold') {
+    return '中性'
+  }
+  return value || '-'
+}
+
+function signalBiasTagColor(value: string | null | undefined) {
+  if (value === 'buy') {
+    return 'green'
+  }
+  if (value === 'sell') {
+    return 'volcano'
+  }
+  if (value === 'hold') {
+    return 'default'
+  }
+  return 'default'
 }
 
 function sideTagColor(value: string | null | undefined) {
