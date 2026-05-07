@@ -2,8 +2,13 @@ import type { PageData } from './api'
 
 export type TradeMode = 'live' | 'sandbox' | 'paper'
 
+export type DataRootMode = 'managed' | 'legacy_inferred' | 'legacy_split' | 'external_database'
+
 // 仍由部署期文件或运行环境维护、页面只读展示的系统信息。
 export interface SystemSettingsReadonly {
+  dataRootDir: string
+  dataRootMode: DataRootMode
+  tradeDatabaseUrl: string
   backtestDataDir: string
   freqtradeUserDataDir: string
   appLogDir: string
@@ -54,6 +59,37 @@ export interface SystemSettingsSavePayload {
   editable: SystemSettingsEditable
   name?: string
   description?: string
+}
+
+export interface SystemDeploymentSettingsEditable {
+  dataRootDir: string
+}
+
+export interface SystemDeploymentPaths {
+  dataRootDir: string
+  databaseUrl: string
+  backtestDataDir: string
+  freqtradeUserDataDir: string
+  appLogDir: string
+}
+
+export interface SystemDeploymentSettings {
+  configFilePath: string
+  editable: SystemDeploymentSettingsEditable
+  derivedPaths: SystemDeploymentPaths
+  runtime: SystemDeploymentPaths
+  compatibilityStatus: DataRootMode
+  compatibilityMessage: string
+  restartRequired: boolean
+}
+
+export interface SystemDeploymentSettingsSavePayload {
+  editable: SystemDeploymentSettingsEditable
+}
+
+export interface SystemDeploymentSettingsSaveResult extends SystemDeploymentSettings {
+  changedKeys: string[]
+  message: string
 }
 
 export interface TradeTaskLogItem {

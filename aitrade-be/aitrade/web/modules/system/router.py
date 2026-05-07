@@ -8,6 +8,7 @@ from ...api_response import success_response
 from ...dependencies import get_config
 from ...dependencies import require_admin
 from ....config.config_file import Config
+from .deployment_config_service import DeploymentConfigService
 from .service import SystemService
 from .trade_task_service import TradeTaskService
 
@@ -38,6 +39,14 @@ class SystemSettingsSaveRequest(BaseModel):
     editable: SystemSettingsEditableRequest
     name: str | None = None
     description: str | None = None
+
+
+class SystemDeploymentSettingsEditableRequest(BaseModel):
+    dataRootDir: str
+
+
+class SystemDeploymentSettingsSaveRequest(BaseModel):
+    editable: SystemDeploymentSettingsEditableRequest
 
 
 class SystemLogFilesRequest(BaseModel):
@@ -106,6 +115,25 @@ def system_settings_save(
     _: dict = Depends(require_admin),
 ):
     service = SystemService(config)
+    return success_response(service.save_settings(payload.model_dump()))
+
+
+@router.post('/deployment-settings')
+def system_deployment_settings(
+    config: Config = Depends(get_config),
+    _: dict = Depends(require_admin),
+):
+    service = DeploymentConfigService(config)
+    return success_response(service.get_settings())
+
+
+@router.post('/deployment-settings/save')
+def system_deployment_settings_save(
+    payload: SystemDeploymentSettingsSaveRequest,
+    config: Config = Depends(get_config),
+    _: dict = Depends(require_admin),
+):
+    service = DeploymentConfigService(config)
     return success_response(service.save_settings(payload.model_dump()))
 
 

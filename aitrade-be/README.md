@@ -11,17 +11,18 @@ A simple trading system for AI.
 ## 配置
 
 1. 复制 `config.example.yaml` 为 `config.yaml`
-2. Web 场景下，`config.yaml` 只需要保留仍然由文件负责的系统级配置：交易所凭证、代理、Web 服务参数、持久化数据库连接，以及回测目录/外部命令
-3. Web 管理台中的“系统设置”页会把一部分系统参数保存到数据库，其中 AI 设置页负责 `app.gpt.provider / model / api_key / base_url`，交易设置页负责 `app.trade.persistence.persist_position / restore_position_on_startup`、`app.trade.market_feeds.trade_flow.*`，数据设置页负责 `app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
-4. 因此 `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次打开系统设置页时，会基于文件中的当前值或运行时默认值初始化数据库记录
-5. 如果你只启动 Web 管理台，`config.yaml` 不再要求保留任务级交易参数；真实交易任务参数以数据库任务配置和启动快照为准
-6. 如果你要直接运行 Bot（`uv run python -m aitrade` / `bash start.sh`），再额外补齐 `app.trade.trade_mode / paper_balance / symbol / timeframe / limit / strategy.*`；其中 `trade_mode` 支持 `live / sandbox / paper`，旧 `sandbox_trade` 仍可兼容映射为 `sandbox / live`
-7. `app.trade.strategy.type` 仅在 Bot/CLI 直跑场景下用于切换交易策略：
+2. Web 场景下，`config.yaml` 的最小必留项已经收敛到：`app.exchange`、`app.http_client`、`app.data_root_dir`、`app.web.port / jwt_secret / cors_allow_origins`、`app.backtest.freqtrade_bin`
+3. `config.example.yaml` 现在就是按这套最小模板提供示例；`host / debug / show_trace / jwt 过期时间 / captcha 过期时间 / init_admin` 等未写出的 Web 参数会直接使用代码默认值
+4. Web 管理台中的“系统设置”页会把一部分系统参数保存到数据库，其中 AI 设置页负责 `app.gpt.provider / model / api_key / base_url`，交易设置页负责 `app.trade.persistence.persist_position / restore_position_on_startup`、`app.trade.market_feeds.trade_flow.*`，数据设置页负责 `app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
+5. 管理台“部署设置”页会直接写回后端 `config.yaml`，现在只维护 `app.data_root_dir` 这一个部署级数据根目录；SQLite、系统日志、历史数据目录与 Freqtrade `user_data` 目录都会由它自动派生，保存后通常需要重启后端才能完全生效
+6. 如果你只启动 Web 管理台，`config.yaml` 不再要求保留任务级交易参数；真实交易任务参数以数据库任务配置和启动快照为准
+7. 如果你要直接运行 Bot（`uv run python -m aitrade` / `bash start.sh`），再额外补齐 `app.trade.trade_mode / paper_balance / symbol / timeframe / limit / strategy.*`；其中 `trade_mode` 支持 `live / sandbox / paper`，旧 `sandbox_trade` 仍可兼容映射为 `sandbox / live`
+8. `app.trade.strategy.type` 仅在 Bot/CLI 直跑场景下用于切换交易策略：
    - `gpt`：保留原有 AI 信号策略
    - `btc_spot_breakout`：BTC 现货 long-only 单周期突破策略
    - `btc_spot_trend_breakout`：BTC 现货趋势突破策略，固定 `1h` 执行并使用 `4h` 趋势过滤
    - `spot_multi_signal_fusion`：现货多源融合策略，第一阶段综合技术面与成交流信号，优先用于 `paper` 实时模拟验证
-8. 默认会把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`
+9. 默认会把结构化交易记录写入 `sqlite:///~/.aitrade/trades.sqlite3`
 
 ## 初始化与运行
 
@@ -92,15 +93,16 @@ bash stop.sh
 - 自动以 `aitrade-be/` 作为后端项目根目录启动，避免 `./config.yaml` 路径错误
 - 启动前会先校验 `config.yaml`，配置错误会直接输出具体配置项和原因
 - 使用 `.venv/bin/python -m aitrade` 后台运行
-- 运行态写入 `.aitrade/`
-- 启动辅助日志写入 `logs/launcher.log`
+- PID 文件等运行态仍写入 `aitrade-be/.aitrade/`
+- 结构化交易记录、历史数据、Freqtrade `user_data` 与系统日志默认按 `app.data_root_dir`（默认 `~/.aitrade/`）自动派生
+- 启动辅助日志当前仍写入 `aitrade-be/logs/launcher.log`
 - 启动失败时会输出最近的启动辅助日志和应用日志，便于快速定位原因
 
 ### `bash status.sh`
 
 - 展示 `running / stopped / stale` 状态
 - 展示 PID、启动时间、配置文件路径、日志目录
-- 主日志以 `logs/` 下的 Python 日志为准
+- 主日志以当前 `app.data_root_dir/logs`（默认 `~/.aitrade/logs/`）下的 Python 日志为准
 
 ### `bash stop.sh`
 
@@ -198,13 +200,13 @@ bash stop.sh
 
 ### 交易记录持久化
 
-- 默认通过 SQLAlchemy 同步 ORM 把交易执行结果写入 `sqlite:///./.aitrade/trades.sqlite3`
+- 默认通过 SQLAlchemy 同步 ORM 把交易执行结果写入 `app.data_root_dir/trades.sqlite3`（默认即 `sqlite:///~/.aitrade/trades.sqlite3`）
 - 默认会持久化当前本地持仓、止损和追踪止损状态到 `position_state` 表
-- 主配置项是 `app.trade.persistence.database_url`，将来可切到 MySQL 等数据库；`sqlite_path` 仅作为兼容旧配置的别名
+- 新配置推荐只维护 `app.data_root_dir`；运行时会自动派生本地 SQLite 地址。旧 `app.trade.persistence.database_url / sqlite_path` 仍可读取兼容，但部署设置页新保存会收敛回单根目录模型
 - `app.trade.persistence.restore_position_on_startup` 默认是 `false`，避免本地快照与真实交易所状态不一致时自动恢复
 - `trade_records` 会记录策略、时间、方向、价格、数量、原因、止损/追踪止损、订单结果、失败原因等字段
 - 交易记录现已补齐 `fee_rate / slippage_rate / estimated_fill_price / estimated_fee / realized_pnl / realized_pnl_net / daily_loss_snapshot` 等执行成本与风控审计字段
-- 后端运行态目录继续统一收敛在 `aitrade-be/`：`config.yaml`、`.venv/`、`.aitrade/`、`logs/`、`dist/` 都视为本地运行或打包产物，不应再在仓库根目录保留新的同类文件
+- 后端运行态目录仍以 `aitrade-be/` 为程序工作目录，但默认数据目录已迁到用户目录 `~/.aitrade/`；`config.yaml`、`.venv/`、`dist/` 仍视为本地运行或打包产物，不应再在仓库根目录保留新的同类文件
 
 常见查询方式：
 
@@ -280,8 +282,8 @@ bash query-trades.sh position
   - `POST /api/backtests/data/export`
   - `POST /api/backtests/data/import`
   - `POST /api/backtests/data/delete`
-- 历史数据由 freqtrade CLI 下载到 `app.backtest.data_dir`
-- freqtrade 运行所需的 `user_data` 与最小 `config.json` 会由后端自动初始化到 `app.backtest.user_data_dir`
+- 历史数据由 freqtrade CLI 下载到 `app.data_root_dir/backtest-data`
+- freqtrade 运行所需的 `user_data` 与最小 `config.json` 会由后端自动初始化到 `app.data_root_dir/freqtrade-user-data`
 - 前端不再让用户输入下载时间范围，下载统一按 `app.backtest.download_timerange` 从最早范围执行到当前时点
 - 历史数据管理页可选交易对来自 `app.backtest.supported_symbols`
 - 导入与导出统一使用 zip 压缩包；导出压缩包内会附带 `manifest.json`
@@ -304,10 +306,10 @@ bash query-trades.sh position
 
 ## 当前限制
 
-- 持仓状态会同时保存在进程内存和持久化存储中；默认数据库地址是 `sqlite:///./.aitrade/trades.sqlite3`，但默认不会在启动时自动恢复；如需恢复，需要显式打开 `app.trade.persistence.restore_position_on_startup`
+- 持仓状态会同时保存在进程内存和持久化存储中；默认数据库地址是 `sqlite:///~/.aitrade/trades.sqlite3`，但默认不会在启动时自动恢复；如需恢复，需要显式打开 `app.trade.persistence.restore_position_on_startup`
 - 当前仓库未内置测试套件，本次主要做了脚本语法检查与定向验证
-- `start.sh` / `status.sh` / `stop.sh` 依赖 `aitrade-be/` 下的 `.aitrade/` 运行态目录
-- 主应用日志、交易日志和启动辅助日志默认写入 `aitrade-be/logs/`
+- `start.sh` / `status.sh` / `stop.sh` 仍依赖 `aitrade-be/` 下的 `.aitrade/` 运行态目录保存 PID 等程序控制信息
+- 主应用日志和交易日志默认写入 `app.data_root_dir/logs`；当前 shell 启动辅助日志仍保留在 `aitrade-be/logs/`，不跟随数据根目录一起派生
 - 如果本地配置指向真实交易环境，运行脚本前请先确认 `config.yaml` 中的 `trade_mode`、交易所凭证与代理配置；其中 `paper` 会读取真实行情但不会真实下单
 
 ## 打包

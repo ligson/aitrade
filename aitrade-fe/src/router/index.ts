@@ -15,6 +15,7 @@ const SignalSourceConfigView = () => import('@/views/strategies/SignalSourceConf
 const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
 const BacktestView = () => import('@/views/backtests/BacktestView.vue')
 const SystemSettingsView = () => import('@/views/system/SystemSettingsView.vue')
+const SystemDeploymentSettingsView = () => import('@/views/system/SystemDeploymentSettingsView.vue')
 const SystemAISettingsView = () => import('@/views/system/SystemAISettingsView.vue')
 const SystemTradeSettingsView = () => import('@/views/system/SystemTradeSettingsView.vue')
 const SystemDataSettingsView = () => import('@/views/system/SystemDataSettingsView.vue')
@@ -47,6 +48,15 @@ const router = createRouter({
           meta: {
             title: '系统概览',
             breadcrumb: ['系统管理', '系统概览'],
+          },
+        },
+        {
+          path: 'system-deployment-settings',
+          name: 'system-deployment-settings',
+          component: SystemDeploymentSettingsView,
+          meta: {
+            title: '部署设置',
+            breadcrumb: ['系统管理', '部署设置'],
           },
         },
         {

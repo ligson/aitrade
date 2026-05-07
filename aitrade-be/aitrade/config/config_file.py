@@ -6,6 +6,24 @@ from typing import Dict
 
 import yaml
 
+from .path_utils import build_managed_data_paths
+from .path_utils import build_sqlite_database_url
+from .path_utils import extract_sqlite_database_path
+from .path_utils import infer_data_root_dir
+from .path_utils import infer_data_root_dir_from_leaf_paths
+from .path_utils import normalize_database_url
+from .path_utils import normalize_filesystem_path
+from .path_utils import resolve_backtest_data_dir
+from .path_utils import resolve_data_root_dir
+from .path_utils import resolve_default_backtest_data_dir
+from .path_utils import resolve_default_data_root_dir
+from .path_utils import resolve_default_freqtrade_user_data_dir
+from .path_utils import resolve_default_log_dir
+from .path_utils import resolve_default_sqlite_path
+from .path_utils import resolve_freqtrade_user_data_dir
+from .path_utils import resolve_log_dir
+from .path_utils import resolve_sqlite_path
+
 
 DEFAULT_GPT_STRATEGY_CONFIG = {
     'min_confidence': 0.7,
@@ -85,7 +103,7 @@ DEFAULT_TRADE_MARKET_FEEDS_CONFIG = {
 
 DEFAULT_TRADE_PERSISTENCE_CONFIG = {
     'enabled': True,
-    'database_url': 'sqlite:///./.aitrade/trades.sqlite3',
+    'database_url': build_sqlite_database_url(resolve_default_sqlite_path()),
     'persist_position': True,
     'restore_position_on_startup': False,
 }
@@ -124,8 +142,8 @@ DEFAULT_WEB_CONFIG = {
 }
 
 DEFAULT_BACKTEST_CONFIG = {
-    'data_dir': './.aitrade/backtest-data',
-    'user_data_dir': './.aitrade/freqtrade-user-data',
+    'data_dir': resolve_default_backtest_data_dir(),
+    'user_data_dir': resolve_default_freqtrade_user_data_dir(),
     'supported_symbols': ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
     'supported_timeframes': ['5m', '15m', '30m', '1h', '4h', '1d'],
     'default_symbol': 'BTC/USDT',
@@ -255,13 +273,15 @@ class Config:
         return cls(copy.deepcopy(config_data), mode=mode)
 
     def __init__(self, config_source, mode: str = 'bot'):
+        self.config_path: str | None = None
         if isinstance(config_source, dict):
             self.config = copy.deepcopy(config_source)
             logging.debug('从内存对象初始化配置，mode=%s', mode)
         else:
             config_file = str(config_source)
+            self.config_path = os.path.abspath(config_file)
             if os.path.exists(config_file):
-                logging.info("配置文件存在，绝对路径：%s", os.path.abspath(config_file))
+                logging.info("配置文件存在，绝对路径：%s", self.config_path)
             else:
                 logging.info("%s配置文件不存在", config_file)
             self.config = load_config(config_file)
@@ -273,6 +293,12 @@ class Config:
             raise ConfigValidationError("config.yaml 顶层结构必须是对象，且至少包含 app 配置")
 
         app_cfg = _require_mapping(self.config.get('app'), 'app')
+        raw_data_root_dir = app_cfg.get('data_root_dir')
+        self.data_root_mode = 'managed'
+        self.data_root_dir = resolve_default_data_root_dir()
+        if raw_data_root_dir is not None:
+            self.data_root_dir = resolve_data_root_dir(_require_non_empty_string(raw_data_root_dir, 'app.data_root_dir'))
+            app_cfg['data_root_dir'] = self.data_root_dir
 
         # Bot/CLI 直跑要求文件里提供完整 AI 配置；
         # Web 管理台模式允许这些字段先缺省，后续再由数据库系统设置补齐生效配置。
@@ -391,26 +417,31 @@ class Config:
         self.trade_persistence_config = merge_config(DEFAULT_TRADE_PERSISTENCE_CONFIG, persistence_overrides)
 
         _require_bool(self.trade_persistence_config.get('enabled'), 'app.trade.persistence.enabled')
-        database_url = persistence_overrides.get('database_url')
-        # trade.persistence 仍属于部署期配置边界，页面目前只允许覆盖持仓持久化开关；
-        # 真实数据库连接地址仍然只从 config.yaml 读取。
-        # sqlite_path 仅用于兼容旧配置，新的配置文件统一使用 database_url。
-        if database_url is None and persistence_overrides.get('sqlite_path') is not None:
-            logging.info('检测到旧字段 app.trade.persistence.sqlite_path，自动转换为 database_url 使用')
-            sqlite_path = _require_non_empty_string(
-                persistence_overrides.get('sqlite_path'),
-                'app.trade.persistence.sqlite_path',
-            )
-            database_url = f'sqlite:///{sqlite_path}'
-        self.trade_persistence_config['database_url'] = _require_non_empty_string(
-            database_url or self.trade_persistence_config.get('database_url'),
-            'app.trade.persistence.database_url',
-        )
-        if persistence_overrides.get('sqlite_path') is not None:
-            self.trade_persistence_config['sqlite_path'] = _require_non_empty_string(
-                persistence_overrides.get('sqlite_path'),
-                'app.trade.persistence.sqlite_path',
-            )
+        if raw_data_root_dir is not None:
+            self.trade_persistence_config['database_url'] = build_sqlite_database_url(resolve_sqlite_path(self.data_root_dir))
+            persistence_overrides.pop('sqlite_path', None)
+        else:
+            database_url = persistence_overrides.get('database_url')
+            # trade.persistence 仍属于部署期配置边界，真实数据库连接地址只从文件配置或部署设置写回的 config.yaml 读取。
+            # sqlite_path 仅用于兼容旧配置，新的配置文件统一使用 database_url。
+            if database_url is None and persistence_overrides.get('sqlite_path') is not None:
+                logging.info('检测到旧字段 app.trade.persistence.sqlite_path，自动转换为 database_url 使用')
+                sqlite_path = _require_non_empty_string(
+                    persistence_overrides.get('sqlite_path'),
+                    'app.trade.persistence.sqlite_path',
+                )
+                database_url = build_sqlite_database_url(sqlite_path)
+            self.trade_persistence_config['database_url'] = normalize_database_url(_require_non_empty_string(
+                database_url or self.trade_persistence_config.get('database_url'),
+                'app.trade.persistence.database_url',
+            ))
+            if persistence_overrides.get('sqlite_path') is not None:
+                self.trade_persistence_config['sqlite_path'] = _require_non_empty_string(
+                    persistence_overrides.get('sqlite_path'),
+                    'app.trade.persistence.sqlite_path',
+                )
+        persistence_overrides['database_url'] = self.trade_persistence_config['database_url']
+        trade_cfg['persistence'] = persistence_overrides
         _require_bool(self.trade_persistence_config.get('persist_position'), 'app.trade.persistence.persist_position')
         _require_bool(
             self.trade_persistence_config.get('restore_position_on_startup'),
@@ -484,17 +515,62 @@ class Config:
             raise ConfigValidationError('配置项 app.web.init_admin.remark 必须是字符串')
         self.web_init_admin_config['remark'] = remark
 
-        # Web 页面只会覆盖回测默认参数，目录路径和外部命令仍然要求在文件里维护。
+        # Web 页面保存的业务默认参数与部署设置分开管理；目录路径和外部命令仍然以文件配置为准。
         backtest_overrides = app_cfg.get('backtest', {})
         if backtest_overrides is None:
             backtest_overrides = {}
         backtest_overrides = _require_mapping(backtest_overrides, 'app.backtest')
         self.backtest_config = merge_config(DEFAULT_BACKTEST_CONFIG, backtest_overrides)
-        self.backtest_config['data_dir'] = _require_non_empty_string(self.backtest_config.get('data_dir'), 'app.backtest.data_dir')
-        self.backtest_config['user_data_dir'] = _require_non_empty_string(
-            self.backtest_config.get('user_data_dir'),
-            'app.backtest.user_data_dir',
-        )
+        if raw_data_root_dir is not None:
+            managed_paths = build_managed_data_paths(self.data_root_dir)
+            self.backtest_config['data_dir'] = managed_paths['backtestDataDir']
+            self.backtest_config['user_data_dir'] = managed_paths['freqtradeUserDataDir']
+            self.log_dir = managed_paths['appLogDir']
+            self.data_root_mode = 'managed'
+        else:
+            self.backtest_config['data_dir'] = normalize_filesystem_path(_require_non_empty_string(
+                self.backtest_config.get('data_dir'),
+                'app.backtest.data_dir',
+            ))
+            self.backtest_config['user_data_dir'] = normalize_filesystem_path(_require_non_empty_string(
+                self.backtest_config.get('user_data_dir'),
+                'app.backtest.user_data_dir',
+            ))
+            log_dir_value = app_cfg.get('log_dir', resolve_default_log_dir())
+            self.log_dir = normalize_filesystem_path(_require_non_empty_string(log_dir_value, 'app.log_dir'))
+            inferred_data_root_dir = infer_data_root_dir(
+                self.trade_persistence_config['database_url'],
+                self.log_dir,
+                self.backtest_config['data_dir'],
+                self.backtest_config['user_data_dir'],
+            )
+            if inferred_data_root_dir is not None:
+                self.data_root_dir = inferred_data_root_dir
+                self.data_root_mode = 'legacy_inferred'
+            elif extract_sqlite_database_path(self.trade_persistence_config['database_url']) is None:
+                inferred_leaf_root = infer_data_root_dir_from_leaf_paths(
+                    self.log_dir,
+                    self.backtest_config['data_dir'],
+                    self.backtest_config['user_data_dir'],
+                )
+                self.data_root_dir = inferred_leaf_root or resolve_default_data_root_dir()
+                self.data_root_mode = 'external_database'
+            else:
+                inferred_leaf_root = infer_data_root_dir_from_leaf_paths(
+                    self.log_dir,
+                    self.backtest_config['data_dir'],
+                    self.backtest_config['user_data_dir'],
+                )
+                sqlite_path = extract_sqlite_database_path(self.trade_persistence_config['database_url'])
+                self.data_root_dir = inferred_leaf_root or str(os.path.dirname(sqlite_path))
+                self.data_root_mode = 'legacy_split'
+        if raw_data_root_dir is not None:
+            app_cfg['data_root_dir'] = self.data_root_dir
+        app_cfg['log_dir'] = self.log_dir
+        backtest_overrides['data_dir'] = self.backtest_config['data_dir']
+        backtest_overrides['user_data_dir'] = self.backtest_config['user_data_dir']
+        app_cfg['backtest'] = backtest_overrides
+        self.managed_data_paths = build_managed_data_paths(self.data_root_dir)
         self.backtest_config['supported_symbols'] = _require_string_list(
             self.backtest_config.get('supported_symbols'),
             'app.backtest.supported_symbols',

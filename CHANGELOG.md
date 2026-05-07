@@ -2,6 +2,15 @@
 
 所有有意义的仓库变更都应记录在这里。
 
+## 2026-05-07
+
+- 调整默认数据目录边界：后端默认将 SQLite 交易库、历史数据目录、Freqtrade `user_data` 目录与系统日志目录迁到用户目录 `~/.aitrade/`，避免继续与 `aitrade-be/` 程序运行目录混在一起；其中 PID 等程序控制运行态仍保留在 `aitrade-be/.aitrade/`。
+- 收敛管理台“部署设置”页与 `/api/system/deployment-settings*` 接口：网页现在只维护 `app.data_root_dir` 这一个部署级数据根目录，并只读展示由其自动派生的 SQLite、系统日志、历史数据目录与 Freqtrade `user_data` 目录；旧分散路径配置仍可兼容读取，但新保存会统一收敛回单根目录模型。
+- 补齐部署级路径归一化：配置加载与日志初始化统一支持 `~` 展开和绝对路径归一，SQLite 文件 URL 也会自动规范化，避免相对路径继续跟随启动工作目录漂移。
+- 继续收敛 Web 场景示例配置：`aitrade-be/config.example.yaml` 现只保留最小必留项，未写出的 Web 参数直接走代码默认值，并在 README / CLAUDE 中明确文件配置、部署设置页与数据库设置页各自的边界。
+
+- 增强远端部署脚本启动后校验稳态：`aitrade-be/deploy.sh` 改为对 `status-web.sh`、端口监听、`/health` 与关键 OpenAPI 路由执行带等待窗口的重试校验，并在最终失败时追加最近状态与 `web-launcher.log` 尾部输出，避免 Web 刚启动时的短暂竞态被误判为部署失败。
+
 ## 2026-04-29
 
 - 打通 `indicator` 信号源第一阶段运行时链路：信号源注册表正式将 `indicator` 标记为 `runtimeSupported=true`，并扩展 `indicator_key / primary_timeframe / lookback_candles / period / lower_threshold / upper_threshold / confirm_crossover` 等参数 schema，页面可直接维护可运行的指标型信号源档案。

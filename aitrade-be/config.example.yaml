@@ -1,11 +1,11 @@
 app:
   exchange:
-    # 交易接口类型, 可选值: binance, okx
+    # 交易接口类型，可选值：binance、okx
     type: binance
     api_key: xxxx
     # 交易接口密钥
     api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    # OKX交易所需要的密码（仅在使用OKX时需要配置）
+    # OKX 交易所需要的密码（仅在使用 OKX 时需要配置）
     password: your_okx_password
 
   http_client:
@@ -14,52 +14,24 @@ app:
     # 代理地址
     proxy_url: http://127.0.0.1:10809
 
+  # 部署级数据根目录；SQLite、系统日志、历史数据与 Freqtrade user_data 都会自动派生到这里
+  data_root_dir: ~/.aitrade
+
   web:
-    # FastAPI 服务监听地址
-    host: 127.0.0.1
-    # FastAPI 服务监听端口
+    # FastAPI 服务监听端口；host/debug/show_trace/jwt 过期时间等其余参数若不写，会使用代码默认值
     port: 18080
-    # 是否为调试模式
-    debug: true
-    # 响应中是否输出 trace，生产环境建议关闭
-    show_trace: true
     # JWT 密钥，生产环境请务必修改
     jwt_secret: change-me-in-production
-    # 登录 token 有效期（分钟）
-    jwt_expire_minutes: 720
-    # 图形验证码有效期（秒）
-    captcha_expire_seconds: 300
     # 允许访问 FastAPI 的前端来源
     cors_allow_origins:
       - http://127.0.0.1:5173
       - http://localhost:5173
-    init_admin:
-      # 启动时是否自动初始化管理员账号
-      enabled: true
-      username: admin
-      password: admin123456
-      email: admin@example.com
-      nickname: 管理员
-      remark: 系统初始化管理员
 
   trade:
-    # Web 管理台场景下，这里只需要保留 persistence。
+    # Web 管理台场景下，这里只需要保留 persistence 结构占位。
     # 如果直接运行 Bot/CLI，再额外补齐 trade_mode / paper_balance / symbol / timeframe / limit / strategy。
-    persistence:
-      # 数据库连接地址，统一使用 database_url；默认使用本地 SQLite，将来可改为 MySQL 等其他数据库 DSN
-      database_url: sqlite:///./.aitrade/trades.sqlite3
-    # trade_mode: sandbox  # live=真实交易，sandbox=沙盒交易，paper=纸上交易
-    # paper_balance: 10000
-    # symbol: BTC/USDT
-    # timeframe: 15
-    # limit: 100
-    # strategy:
-    #   type: gpt  # 也可选 btc_spot_breakout / btc_spot_trend_breakout / spot_multi_signal_fusion
+    persistence: {}
 
   backtest:
-    # Freqtrade 下载的历史数据目录
-    data_dir: ./.aitrade/backtest-data
-    # Freqtrade CLI 的 user_data 目录，会由接口自动初始化
-    user_data_dir: ./.aitrade/freqtrade-user-data
     # freqtrade 命令名，可替换为绝对路径
     freqtrade_bin: freqtrade

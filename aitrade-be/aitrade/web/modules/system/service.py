@@ -10,7 +10,6 @@ from typing import Any
 
 from ....config.config_file import Config
 from ....config.config_file import ConfigValidationError
-from ....config.log_config import resolve_log_dir
 from ....db import Base
 from ....db import SystemSettingProfileModel
 from ....db.session import get_engine
@@ -34,13 +33,13 @@ class SystemService:
         self.database_url = config.trade_persistence_config['database_url']
         self.engine = get_engine(self.database_url)
         self.Session = get_session_factory(self.database_url)
-        self.log_dir = Path(resolve_log_dir()).resolve()
+        self.log_dir = Path(config.log_dir).expanduser().resolve()
         self.log_dir.mkdir(parents=True, exist_ok=True)
         Base.metadata.create_all(self.engine)
 
     def get_settings(self) -> dict[str, Any]:
-        # readonly 仅展示仍由部署期文件维护的路径类信息；
-        # editable 才是允许页面保存并持久化到数据库的可编辑字段。
+        # readonly 仅展示仍由部署期文件维护的根目录、路径类与数据库连接信息；
+        # editable 才是允许页面保存并持久化到数据库的业务默认参数。
         effective_config, profile = self.get_effective_config()
         logging.debug('读取系统设置成功: profile_id=%s schema_version=%s', profile.id, profile.schema_version)
         backtest_config = effective_config.backtest_config
@@ -49,6 +48,9 @@ class SystemService:
         freqtrade_user_data_dir = Path(base_backtest_config['user_data_dir']).expanduser().resolve()
         return {
             'readonly': {
+                'dataRootDir': self.config.data_root_dir,
+                'dataRootMode': self.config.data_root_mode,
+                'tradeDatabaseUrl': self.database_url,
                 'backtestDataDir': str(backtest_data_dir),
                 'freqtradeUserDataDir': str(freqtrade_user_data_dir),
                 'appLogDir': str(self.log_dir),

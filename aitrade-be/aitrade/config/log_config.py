@@ -4,14 +4,37 @@ import os
 from logging.handlers import TimedRotatingFileHandler
 
 import colorlog
+import yaml
+
+from .path_utils import normalize_filesystem_path
+from .path_utils import resolve_default_data_root_dir
+from .path_utils import resolve_default_log_dir
+from .path_utils import resolve_log_dir as resolve_log_dir_from_data_root
 
 
-def resolve_log_dir() -> str:
-    return os.path.join(os.getcwd(), "logs")
+def resolve_log_dir(config_file: str = './config.yaml') -> str:
+    default_log_dir = resolve_default_log_dir()
+    try:
+        if not os.path.exists(config_file):
+            return default_log_dir
+        with open(config_file, 'r', encoding='utf-8') as file:
+            config_data = yaml.safe_load(file) or {}
+        app_cfg = config_data.get('app') or {}
+        data_root_dir = app_cfg.get('data_root_dir')
+        if isinstance(data_root_dir, str) and data_root_dir.strip():
+            return resolve_log_dir_from_data_root(data_root_dir)
+        log_dir = app_cfg.get('log_dir')
+        if not isinstance(log_dir, str) or not log_dir.strip():
+            return default_log_dir
+        return normalize_filesystem_path(log_dir)
+    except Exception as exc:
+        fallback_root = resolve_default_data_root_dir()
+        print(f'[WARN] 读取日志目录配置失败，回退到默认目录 {default_log_dir}（data_root_dir 默认 {fallback_root}）: {exc}')
+        return default_log_dir
 
 
-def config_log():
-    log_dir = resolve_log_dir()
+def config_log(config_file: str = './config.yaml'):
+    log_dir = resolve_log_dir(config_file)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 

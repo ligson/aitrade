@@ -1,5 +1,8 @@
 import { post } from './http'
 import type {
+  SystemDeploymentSettings,
+  SystemDeploymentSettingsSavePayload,
+  SystemDeploymentSettingsSaveResult,
   SystemLogContent,
   SystemLogFilePage,
   SystemSettings,
@@ -18,6 +21,14 @@ export function fetchSystemSettings() {
 
 export function saveSystemSettings(payload: SystemSettingsSavePayload) {
   return post<SystemSettings>('/api/system/settings/save', payload)
+}
+
+export function fetchSystemDeploymentSettings() {
+  return post<SystemDeploymentSettings>('/api/system/deployment-settings')
+}
+
+export function saveSystemDeploymentSettings(payload: SystemDeploymentSettingsSavePayload) {
+  return post<SystemDeploymentSettingsSaveResult>('/api/system/deployment-settings/save', payload)
 }
 
 export function pageSystemLogFiles(payload: {

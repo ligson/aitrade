@@ -11,6 +11,8 @@ FRONTEND_DIST_DIR="$FRONTEND_DIR/dist"
 DIST_DIR="$ROOT_DIR/dist"
 REMOTE_WEB_PORT="18080"
 VERIFY_ROUTE_PATH="/api/system/trade-task/logs/page"
+STARTUP_MAX_ATTEMPTS="12"
+STARTUP_SLEEP_SECONDS="2"
 
 log() {
     printf '[deploy] %s\n' "$1"
@@ -90,7 +92,87 @@ log '切换 current 到新版本并重启 Web 服务'
 ssh "$SSH_ALIAS" "set -euo pipefail; ln -sfn '$REMOTE_RELEASE_DIR' '$REMOTE_CURRENT_LINK'; cd '$REMOTE_CURRENT_LINK/aitrade-be'; bash init-env.sh; bash start-web.sh; bash status-web.sh; test -f '$REMOTE_SHARED_PUBLIC_DIR/index.html'"
 
 log '执行远端部署后校验'
-ssh "$SSH_ALIAS" "set -euo pipefail; CURRENT_TARGET=\$(readlink '$REMOTE_CURRENT_LINK'); if [ \"\$CURRENT_TARGET\" != '$REMOTE_RELEASE_DIR' ]; then echo '[deploy][ERROR] current 软链未指向本次版本：'\"\$CURRENT_TARGET\"; exit 1; fi; STATUS_OUTPUT=\$(cd '$REMOTE_CURRENT_LINK/aitrade-be' && bash status-web.sh); printf '%s\n' \"\$STATUS_OUTPUT\"; printf '%s\n' \"\$STATUS_OUTPUT\" | grep -q '\\[INFO\\] 当前状态: running' || { echo '[deploy][ERROR] Web 服务未处于 running 状态'; exit 1; }; RUNTIME_PID=\$(printf '%s\n' \"\$STATUS_OUTPUT\" | grep '^PID:' | head -n 1 | awk '{print \$2}'); LISTENER_PID=\$(printf '%s\n' \"\$STATUS_OUTPUT\" | grep '^监听 PID:' | head -n 1 | awk '{print \$3}'); if [ -n \"\$LISTENER_PID\" ] && [ \"\$RUNTIME_PID\" != \"\$LISTENER_PID\" ]; then echo '[deploy][ERROR] 运行态 PID 与监听 PID 不一致：runtime='\"\$RUNTIME_PID\"' listener='\"\$LISTENER_PID\"; exit 1; fi; HTTP_CODE=\$(curl -sS -o /tmp/aitrade-health.out -w '%{http_code}' 'http://127.0.0.1:$REMOTE_WEB_PORT/health'); if [ \"\$HTTP_CODE\" -lt 200 ] || [ \"\$HTTP_CODE\" -ge 300 ]; then echo '[deploy][ERROR] /health 校验失败，HTTP 状态码：'\"\$HTTP_CODE\"; cat /tmp/aitrade-health.out; exit 1; fi; curl -fsS 'http://127.0.0.1:$REMOTE_WEB_PORT/openapi.json' | python3 -c \"import json,sys; data=json.load(sys.stdin); path='$VERIFY_ROUTE_PATH'; sys.exit(0 if path in data.get('paths', {}) else 1)\" || { echo '[deploy][ERROR] openapi.json 未包含关键路由 $VERIFY_ROUTE_PATH'; exit 1; }"
+ssh "$SSH_ALIAS" bash -s -- "$REMOTE_CURRENT_LINK" "$REMOTE_RELEASE_DIR" "$REMOTE_SHARED_PUBLIC_DIR" "$REMOTE_WEB_PORT" "$VERIFY_ROUTE_PATH" "$STARTUP_MAX_ATTEMPTS" "$STARTUP_SLEEP_SECONDS" <<'EOF'
+set -euo pipefail
+
+REMOTE_CURRENT_LINK="$1"
+REMOTE_RELEASE_DIR="$2"
+REMOTE_SHARED_PUBLIC_DIR="$3"
+REMOTE_WEB_PORT="$4"
+VERIFY_ROUTE_PATH="$5"
+STARTUP_MAX_ATTEMPTS="$6"
+STARTUP_SLEEP_SECONDS="$7"
+HEALTH_OUTPUT_FILE="/tmp/aitrade-health.out"
+OPENAPI_OUTPUT_FILE="/tmp/aitrade-openapi.json"
+
+CURRENT_TARGET="$(readlink "$REMOTE_CURRENT_LINK")"
+if [ "$CURRENT_TARGET" != "$REMOTE_RELEASE_DIR" ]; then
+    echo "[deploy][ERROR] current 软链未指向本次版本：$CURRENT_TARGET"
+    exit 1
+fi
+
+if [ ! -f "$REMOTE_SHARED_PUBLIC_DIR/index.html" ]; then
+    echo "[deploy][ERROR] 前端静态文件缺失：$REMOTE_SHARED_PUBLIC_DIR/index.html"
+    exit 1
+fi
+
+ATTEMPT=1
+LAST_STATUS_OUTPUT=''
+LAST_HEALTH_CODE=''
+LAST_HEALTH_BODY=''
+LAST_OPENAPI_ERROR=''
+
+# Web 进程启动到真正接管端口和路由表之间可能有短暂窗口，这里重试等待避免误报。
+while [ "$ATTEMPT" -le "$STARTUP_MAX_ATTEMPTS" ]; do
+    LAST_STATUS_OUTPUT="$(cd "$REMOTE_CURRENT_LINK/aitrade-be" && bash status-web.sh 2>&1 || true)"
+    printf '[deploy] 启动校验第 %s/%s 次\n' "$ATTEMPT" "$STARTUP_MAX_ATTEMPTS"
+    printf '%s\n' "$LAST_STATUS_OUTPUT"
+
+    if printf '%s\n' "$LAST_STATUS_OUTPUT" | grep -q '\[INFO\] 当前状态: running'; then
+        RUNTIME_PID="$(printf '%s\n' "$LAST_STATUS_OUTPUT" | grep '^PID:' | head -n 1 | awk '{print $2}')"
+        LISTENER_PID="$(printf '%s\n' "$LAST_STATUS_OUTPUT" | grep '^监听 PID:' | head -n 1 | awk '{print $3}')"
+
+        if [ -n "$LISTENER_PID" ] && [ "$RUNTIME_PID" = "$LISTENER_PID" ]; then
+            LAST_HEALTH_CODE="$(curl -sS -o "$HEALTH_OUTPUT_FILE" -w '%{http_code}' "http://127.0.0.1:$REMOTE_WEB_PORT/health" || true)"
+            LAST_HEALTH_BODY="$(cat "$HEALTH_OUTPUT_FILE" 2>/dev/null || true)"
+
+            if [ "$LAST_HEALTH_CODE" -ge 200 ] && [ "$LAST_HEALTH_CODE" -lt 300 ]; then
+                if curl -fsS "http://127.0.0.1:$REMOTE_WEB_PORT/openapi.json" -o "$OPENAPI_OUTPUT_FILE"; then
+                    if python3 -c "import json,sys; data=json.load(open(sys.argv[1])); path=sys.argv[2]; sys.exit(0 if path in data.get('paths', {}) else 1)" "$OPENAPI_OUTPUT_FILE" "$VERIFY_ROUTE_PATH"; then
+                        rm -f "$HEALTH_OUTPUT_FILE" "$OPENAPI_OUTPUT_FILE"
+                        exit 0
+                    fi
+                    LAST_OPENAPI_ERROR="openapi.json 未包含关键路由 $VERIFY_ROUTE_PATH"
+                else
+                    LAST_OPENAPI_ERROR='openapi.json 拉取失败'
+                fi
+            fi
+        fi
+    fi
+
+    if [ "$ATTEMPT" -lt "$STARTUP_MAX_ATTEMPTS" ]; then
+        sleep "$STARTUP_SLEEP_SECONDS"
+    fi
+    ATTEMPT=$((ATTEMPT + 1))
+done
+
+echo "[deploy][ERROR] Web 服务在等待窗口内仍未完成启动校验"
+printf '%s\n' "$LAST_STATUS_OUTPUT"
+if [ -n "$LAST_HEALTH_CODE" ]; then
+    echo "[deploy][ERROR] 最近一次 /health 状态码：$LAST_HEALTH_CODE"
+    if [ -n "$LAST_HEALTH_BODY" ]; then
+        printf '%s\n' "$LAST_HEALTH_BODY"
+    fi
+fi
+if [ -n "$LAST_OPENAPI_ERROR" ]; then
+    echo "[deploy][ERROR] $LAST_OPENAPI_ERROR"
+fi
+if [ -f "$REMOTE_CURRENT_LINK/aitrade-be/logs/web-launcher.log" ]; then
+    echo '[deploy][ERROR] 最近 60 行 web-launcher.log：'
+    tail -n 60 "$REMOTE_CURRENT_LINK/aitrade-be/logs/web-launcher.log" || true
+fi
+exit 1
+EOF
 
 log '远端部署完成'
 printf 'SSH 别名: %s\n' "$SSH_ALIAS"

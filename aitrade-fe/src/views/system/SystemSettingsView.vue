@@ -5,10 +5,12 @@
         type="info"
         show-icon
         message="这里维护的是系统设置概览。"
-        description="可网页维护的参数已拆分到 AI 设置、交易设置、数据设置三个独立页面。AI 的 provider、model、API Key 与可选 Base URL 改由 AI 设置页维护；交易所凭证、数据库连接、代理、监听地址、目录路径和外部命令等部署期配置仍需通过后端 config.yaml 维护。"
+        description="可网页维护的参数已拆分为两类：AI 设置、交易设置、数据设置仍由数据库保存业务默认参数；部署设置页则会直接写回后端 config.yaml，并以单一数据根目录自动规划数据库、日志和历史数据路径。"
       />
 
       <a-descriptions title="只读部署信息" :column="1" bordered :loading="loading">
+        <a-descriptions-item label="数据根目录">{{ settings.readonly.dataRootDir || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="数据库连接地址">{{ settings.readonly.tradeDatabaseUrl || '-' }}</a-descriptions-item>
         <a-descriptions-item label="历史数据目录">{{ settings.readonly.backtestDataDir || '-' }}</a-descriptions-item>
         <a-descriptions-item label="Freqtrade user_data 目录">{{ settings.readonly.freqtradeUserDataDir || '-' }}</a-descriptions-item>
         <a-descriptions-item label="系统日志目录">{{ settings.readonly.appLogDir || '-' }}</a-descriptions-item>
@@ -16,6 +18,7 @@
 
       <a-card title="维护入口" size="small">
         <a-space wrap>
+          <RouterLink to="/system-deployment-settings"><a-button>部署设置</a-button></RouterLink>
           <RouterLink to="/system-ai-settings"><a-button>AI 设置</a-button></RouterLink>
           <RouterLink to="/system-trade-settings"><a-button>交易设置</a-button></RouterLink>
           <RouterLink to="/system-data-settings"><a-button>数据设置</a-button></RouterLink>

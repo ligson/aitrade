@@ -127,6 +127,7 @@ const menuGroups: MenuGroup[] = [
     children: [
       // 系统设置已拆成概览、AI、交易、数据和日志多个入口，这里需要与路由和概览页导航保持一致。
       { key: 'system-settings', title: '系统概览', icon: SettingOutlined, routePath: '/system-settings', adminOnly: true },
+      { key: 'system-deployment-settings', title: '部署设置', icon: DatabaseOutlined, routePath: '/system-deployment-settings', adminOnly: true },
       { key: 'system-ai-settings', title: 'AI 设置', icon: SettingOutlined, routePath: '/system-ai-settings', adminOnly: true },
       { key: 'system-trade-settings', title: '交易设置', icon: SettingOutlined, routePath: '/system-trade-settings', adminOnly: true },
       { key: 'system-data-settings', title: '数据设置', icon: DatabaseOutlined, routePath: '/system-data-settings', adminOnly: true },

@@ -73,7 +73,7 @@ bash status.sh
 bash stop.sh
 ```
 
-现有后台脚本主要服务 Bot 运行链路。它们会自动以 `aitrade-be/` 为工作目录执行，因为 `aitrade/__main__.py` 与 `aitrade/web_runner.py` 都固定读取 `./config.yaml`，而 `aitrade/config/log_config.py` 会把日志写到当前工作目录下的 `logs/`。
+现有后台脚本主要服务 Bot 运行链路。它们会自动以 `aitrade-be/` 为工作目录执行，因为 `aitrade/__main__.py` 与 `aitrade/web_runner.py` 都固定读取 `./config.yaml`；但默认数据目录已与程序目录分离，结构化交易记录、历史数据、Freqtrade `user_data` 和系统日志默认写入用户目录 `~/.aitrade/`，只有 PID 等程序控制运行态仍保留在 `aitrade-be/.aitrade/`。
 
 ### 源码打包
 
@@ -101,18 +101,19 @@ bash query-trades.sh position
 
 运行时配置通过 `aitrade/config/config_file.py` 从 `config.yaml` 加载。
 
-Web 场景下，`config.yaml` 需要保留的顶层结构包括：
+Web 场景下，`config.yaml` 需要保留的最小顶层结构包括：
 - `app.exchange`：交易所类型、凭证，以及可选的 OKX 密码
 - `app.http_client`：代理开关与代理地址
-- `app.trade.persistence`：至少保留 `database_url`
-- `app.web`：Web 服务配置
-- `app.backtest`：至少保留 `data_dir / user_data_dir / freqtrade_bin`
+- `app.data_root_dir`：部署级数据根目录
+- `app.web`：至少保留 `port / jwt_secret / cors_allow_origins`；其他 Web 参数缺省时使用代码默认值
+- `app.backtest`：至少保留 `freqtrade_bin`
 
 补充说明：
 - Web 管理台“系统设置”页会把一部分系统参数保存到数据库，并在 Web 场景下覆盖 `config.yaml` 中对应字段
 - 当前允许网页维护的主要是 `app.gpt.provider / model / api_key / base_url`、`app.trade.persistence.persist_position / restore_position_on_startup`、`app.backtest.supported_* / default_* / download_timerange / data_format_ohlcv / export_archive_format`
-- `config.example.yaml` 已按 Web 场景精简，不再保留上述可网页维护字段；首次创建系统设置记录时，会基于文件中的当前值或运行时默认值补齐
-- `app.exchange.*`、`app.web.jwt_secret`、`app.trade.persistence.database_url`、`app.http_client.*`、`app.web.host/port/debug/show_trace/cors_allow_origins`、`app.backtest.data_dir/user_data_dir/freqtrade_bin` 等敏感或部署期配置仍只来自 `config.yaml`
+- 管理台“部署设置”页会直接写回 `config.yaml`，现在只维护 `app.data_root_dir`；SQLite、系统日志、历史数据目录和 Freqtrade `user_data` 目录都会由它自动派生
+- `config.example.yaml` 已进一步收敛为 Web 场景最小模板，不再保留上述可网页维护字段；首次创建系统设置记录时，会基于文件中的当前值或运行时默认值补齐
+- `app.exchange.*`、`app.web.jwt_secret`、`app.http_client.*`、`app.data_root_dir`、`app.web.port/cors_allow_origins`、`app.backtest.freqtrade_bin` 等敏感或部署期配置仍只来自 `config.yaml`
 - 融合策略与信号源的可复用实例配置不再放入 `config.yaml`，而是通过 `strategy_profiles` 与新增的 `signal_source_profiles` 在管理台维护；任务启动时会把引用关系和实际生效参数一起冻结到 run snapshot
 
 仅在 Bot/CLI 直跑场景下，才额外要求：
@@ -149,9 +150,9 @@ app:
 新环境初始化时，以精简后的 `config.example.yaml` 作为 Web 场景配置结构的权威示例；如需直跑 Bot，再按文档补齐任务级字段。
 
 额外的持久化约定：
-- 默认通过 SQLAlchemy 同步 ORM 把结构化交易记录写入 `sqlite:///./.aitrade/trades.sqlite3`
+- 默认通过 SQLAlchemy 同步 ORM 把结构化交易记录写入 `app.data_root_dir/trades.sqlite3`（默认即 `sqlite:///~/.aitrade/trades.sqlite3`）
 - `trade_records` 表用于查询交易记录，`position_state` 表用于保存本地持仓快照
-- `app.trade.persistence.database_url` 是主配置项；`sqlite_path` 仅作为兼容旧配置的别名
+- 新配置推荐只维护 `app.data_root_dir`；旧 `app.trade.persistence.database_url / sqlite_path` 仍保留读取兼容，但新部署设置保存会收敛回单根目录模型
 - `app.trade.persistence.restore_position_on_startup` 默认应保持 `false`，除非明确接受用本地快照恢复持仓的风险
 - 如需本地查询，使用 `bash query-trades.sh`，不要虚构其他不存在的查询命令
 
@@ -213,9 +214,9 @@ app:
 
 ## 重要实现约束
 
-- 持仓状态会同时保存在 `trade_executor.py` 的内存对象和持久化存储中；默认数据库地址是 `sqlite:///./.aitrade/trades.sqlite3`，只有在显式开启 `app.trade.persistence.restore_position_on_startup` 时，才会在启动时从本地快照恢复。
+- 持仓状态会同时保存在 `trade_executor.py` 的内存对象和持久化存储中；默认数据库地址是 `sqlite:///~/.aitrade/trades.sqlite3`，只有在显式开启 `app.trade.persistence.restore_position_on_startup` 时，才会在启动时从本地快照恢复。
 - 配置路径写死为 `./config.yaml`，因此脚本必须先在 `aitrade-be/` 目录执行，或通过仓库根目录兼容脚本转发到这里。
-- 后台运行态保存在 `.aitrade/`；主应用日志、交易日志和启动辅助日志保存在 `logs/`。
+- 默认数据目录与程序目录分离：结构化交易记录、历史数据、Freqtrade `user_data` 与 Python 应用日志默认按 `app.data_root_dir`（默认 `~/.aitrade/`）自动派生；`aitrade-be/.aitrade/` 仅继续承担 PID 等程序控制运行态，shell 启动辅助日志仍保留在 `aitrade-be/logs/`。
 - 当前缺少测试，验证方式以手工和定向检查为主。
 - 15 分钟 BTC 突破策略已做过滤，但仍可能受噪音影响，优先建议沙盒联调。
 - `btc_spot_trend_breakout` 当前固定使用 `1h` 执行周期和 `4h` 趋势过滤；不要在页面或实现里把它放宽为任意周期组合。

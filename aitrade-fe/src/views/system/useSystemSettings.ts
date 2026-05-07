@@ -8,6 +8,9 @@ function createEmptySettings(): SystemSettings {
   // 真正的生效值始终以后端 loadSettings() 返回的数据为准。
   return {
     readonly: {
+      dataRootDir: '',
+      dataRootMode: 'managed',
+      tradeDatabaseUrl: '',
       backtestDataDir: '',
       freqtradeUserDataDir: '',
       appLogDir: '',
