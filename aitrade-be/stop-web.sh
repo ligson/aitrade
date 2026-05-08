@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RUNTIME_DIR="$ROOT_DIR/.aitrade"
 PID_FILE="$RUNTIME_DIR/web.pid"
 RUNTIME_FILE="$RUNTIME_DIR/web.runtime.env"
@@ -60,8 +60,32 @@ pid_command() {
     ps -p "$pid" -o command= 2>/dev/null || true
 }
 
+process_is_web_runner() {
+    local pid="$1"
+    local cmdline
+
+    cmdline=$(pid_command "$pid")
+    [ -n "$cmdline" ] && [[ "$cmdline" == *"-m aitrade.web_runner"* ]]
+}
+
+normalize_dir_path() {
+    local dir_path="$1"
+
+    if [ -z "$dir_path" ] || [ ! -d "$dir_path" ]; then
+        printf '%s\n' "$dir_path"
+        return 0
+    fi
+
+    (cd "$dir_path" && pwd -P) 2>/dev/null || printf '%s\n' "$dir_path"
+}
+
 process_cwd() {
     local pid="$1"
+
+    if [ -L "/proc/$pid/cwd" ]; then
+        readlink "/proc/$pid/cwd" 2>/dev/null || true
+        return 0
+    fi
 
     if [ "$HAS_LSOF" -ne 1 ]; then
         return 0
@@ -79,15 +103,11 @@ process_matches() {
         return 1
     fi
 
-    cmdline=$(pid_command "$pid")
-    if [ -z "$cmdline" ]; then
-        return 1
-    fi
-    if [[ "$cmdline" != *"-m aitrade.web_runner"* ]]; then
+    if ! process_is_web_runner "$pid"; then
         return 1
     fi
 
-    process_root=$(process_cwd "$pid")
+    process_root=$(normalize_dir_path "$(process_cwd "$pid")")
     if [ -n "$process_root" ] && [ "$process_root" != "$ROOT_DIR" ]; then
         return 1
     fi
@@ -164,6 +184,7 @@ CONFIG_PATH=''
 LAUNCHER_LOG=''
 WEB_HOST=''
 WEB_PORT=''
+ALLOW_FOREIGN_WEB_RUNNER_STOP=0
 if [ ! -f "$PID_FILE" ] && [ ! -f "$RUNTIME_FILE" ]; then
     resolve_configured_endpoint || true
     ORPHAN_LISTENER_PID=''
@@ -179,6 +200,16 @@ if [ ! -f "$PID_FILE" ] && [ ! -f "$RUNTIME_FILE" ]; then
         PYTHON_BIN="$VENV_PYTHON"
         CONFIG_PATH="$ROOT_DIR/config.yaml"
         LAUNCHER_LOG="$LOG_DIR/web-launcher.log"
+        ALLOW_FOREIGN_WEB_RUNNER_STOP=1
+    elif [ -n "$ORPHAN_LISTENER_PID" ] && process_is_web_runner "$ORPHAN_LISTENER_PID"; then
+        warn "检测到其他发布目录中的 Web 进程仍占用目标端口，按监听端口停止遗留进程。"
+        PID="$ORPHAN_LISTENER_PID"
+        STARTED_AT='unknown'
+        REPO_ROOT="$ROOT_DIR"
+        PYTHON_BIN="$VENV_PYTHON"
+        CONFIG_PATH="$ROOT_DIR/config.yaml"
+        LAUNCHER_LOG="$LOG_DIR/web-launcher.log"
+        ALLOW_FOREIGN_WEB_RUNNER_STOP=1
     else
         info "Web 服务已停止，无需处理。"
         print_log_info
@@ -192,10 +223,12 @@ elif ! load_runtime; then
 fi
 
 if ! process_matches "$PID"; then
-    warn "检测到陈旧 Web 运行态，已清理。"
-    cleanup_runtime
-    print_log_info
-    exit 0
+    if [ "$ALLOW_FOREIGN_WEB_RUNNER_STOP" -ne 1 ] || ! process_is_web_runner "$PID"; then
+        warn "检测到陈旧 Web 运行态，已清理。"
+        cleanup_runtime
+        print_log_info
+        exit 0
+    fi
 fi
 
 info "正在停止 Web 服务，PID: $PID"

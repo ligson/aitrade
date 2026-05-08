@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RUNTIME_DIR="$ROOT_DIR/.aitrade"
 PID_FILE="$RUNTIME_DIR/web.pid"
 RUNTIME_FILE="$RUNTIME_DIR/web.runtime.env"
@@ -46,8 +46,32 @@ pid_command() {
     ps -p "$pid" -o command= 2>/dev/null || true
 }
 
+process_is_web_runner() {
+    local pid="$1"
+    local cmdline
+
+    cmdline=$(pid_command "$pid")
+    [ -n "$cmdline" ] && [[ "$cmdline" == *"-m aitrade.web_runner"* ]]
+}
+
+normalize_dir_path() {
+    local dir_path="$1"
+
+    if [ -z "$dir_path" ] || [ ! -d "$dir_path" ]; then
+        printf '%s\n' "$dir_path"
+        return 0
+    fi
+
+    (cd "$dir_path" && pwd -P) 2>/dev/null || printf '%s\n' "$dir_path"
+}
+
 process_cwd() {
     local pid="$1"
+
+    if [ -L "/proc/$pid/cwd" ]; then
+        readlink "/proc/$pid/cwd" 2>/dev/null || true
+        return 0
+    fi
 
     if [ "$HAS_LSOF" -ne 1 ]; then
         return 0
@@ -65,15 +89,11 @@ process_matches() {
         return 1
     fi
 
-    cmdline=$(pid_command "$pid")
-    if [ -z "$cmdline" ]; then
-        return 1
-    fi
-    if [[ "$cmdline" != *"-m aitrade.web_runner"* ]]; then
+    if ! process_is_web_runner "$pid"; then
         return 1
     fi
 
-    process_root=$(process_cwd "$pid")
+    process_root=$(normalize_dir_path "$(process_cwd "$pid")")
     if [ -n "$process_root" ] && [ "$process_root" != "$ROOT_DIR" ]; then
         return 1
     fi
