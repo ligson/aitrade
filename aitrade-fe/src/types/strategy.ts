@@ -86,6 +86,7 @@ export interface FusionSummary {
 
 export interface StrategyProfile {
   id: number
+  ownerUserId: number | null
   strategyType: string
   name: string
   description: string
@@ -96,4 +97,28 @@ export interface StrategyProfile {
   updatedAt: string
   definition?: StrategyDefinition
   fusionSummary?: FusionSummary | null
+}
+
+export interface InvalidStrategyProfile {
+  id: number
+  ownerUserId: number | null
+  strategyType: string
+  name: string
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+  errorStage: 'json_load' | 'normalize' | 'summarize' | string
+  errorMessage: string
+}
+
+export interface StrategyProfileListSummary {
+  total: number
+  validCount: number
+  invalidCount: number
+}
+
+export interface StrategyProfileListResult {
+  items: StrategyProfile[]
+  invalidItems: InvalidStrategyProfile[]
+  summary: StrategyProfileListSummary
 }

@@ -2,6 +2,7 @@ import type { TradeMode } from './system'
 
 export interface TradeLogItem {
   id: number
+  owner_user_id: number | null
   created_at: string
   run_id: number | null
   trade_task_profile_id: number | null
@@ -43,6 +44,7 @@ export interface TradeLogItem {
 }
 
 export interface PositionItem {
+  owner_user_id: number | null
   symbol: string
   strategy: string
   entry_time: string | null

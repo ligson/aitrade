@@ -7,7 +7,6 @@ const BasicLayout = () => import('@/layouts/BasicLayout.vue')
 const LoginView = () => import('@/views/login/LoginView.vue')
 const UserListView = () => import('@/views/users/UserListView.vue')
 const TradeLogView = () => import('@/views/trade-logs/TradeLogView.vue')
-const TradeTaskProfileView = () => import('@/views/trade-logs/TradeTaskProfileView.vue')
 const TradeTaskControlView = () => import('@/views/trade-logs/TradeTaskControlView.vue')
 const TradeTaskLogView = () => import('@/views/trade-logs/TradeTaskLogView.vue')
 const StrategyConfigView = () => import('@/views/strategies/StrategyConfigView.vue')
@@ -15,6 +14,7 @@ const SignalSourceConfigView = () => import('@/views/strategies/SignalSourceConf
 const BacktestDataView = () => import('@/views/backtests/BacktestDataView.vue')
 const BacktestView = () => import('@/views/backtests/BacktestView.vue')
 const SystemSettingsView = () => import('@/views/system/SystemSettingsView.vue')
+const UserExchangeSettingsView = () => import('@/views/system/UserExchangeSettingsView.vue')
 const SystemDeploymentSettingsView = () => import('@/views/system/SystemDeploymentSettingsView.vue')
 const SystemAISettingsView = () => import('@/views/system/SystemAISettingsView.vue')
 const SystemTradeSettingsView = () => import('@/views/system/SystemTradeSettingsView.vue')
@@ -39,7 +39,7 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: '/trade-logs',
+          redirect: '/trade-tasks',
         },
         {
           path: 'system-settings',
@@ -48,6 +48,15 @@ const router = createRouter({
           meta: {
             title: '系统概览',
             breadcrumb: ['系统管理', '系统概览'],
+          },
+        },
+        {
+          path: 'user-exchange-settings',
+          name: 'user-exchange-settings',
+          component: UserExchangeSettingsView,
+          meta: {
+            title: '交易所设置',
+            breadcrumb: ['系统管理', '交易所设置'],
           },
         },
         {
@@ -106,25 +115,20 @@ const router = createRouter({
         },
         {
           path: 'trade-tasks',
-          redirect: '/trade-task-profiles',
+          name: 'trade-tasks',
+          component: TradeTaskControlView,
+          meta: {
+            title: '任务中心',
+            breadcrumb: ['交易中心', '任务中心'],
+          },
         },
         {
           path: 'trade-task-profiles',
-          name: 'trade-task-profiles',
-          component: TradeTaskProfileView,
-          meta: {
-            title: '交易任务配置',
-            breadcrumb: ['交易中心', '交易任务配置'],
-          },
+          redirect: (to) => ({ path: '/trade-tasks', query: { ...to.query, tab: 'config' } }),
         },
         {
           path: 'trade-task-control',
-          name: 'trade-task-control',
-          component: TradeTaskControlView,
-          meta: {
-            title: '交易任务控制',
-            breadcrumb: ['交易中心', '交易任务控制'],
-          },
+          redirect: (to) => ({ path: '/trade-tasks', query: { ...to.query, tab: 'runtime' } }),
         },
         {
           path: 'trade-task-logs',
@@ -232,7 +236,7 @@ router.beforeEach(async (to) => {
     await auth.restore()
   }
   if (to.path === '/login' && auth.isLoggedIn) {
-    return '/trade-logs'
+    return '/trade-tasks'
   }
   if (to.path !== '/login' && !auth.isLoggedIn) {
     return '/login'

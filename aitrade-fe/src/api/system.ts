@@ -8,11 +8,14 @@ import type {
   SystemSettings,
   SystemSettingsSavePayload,
   TradeTaskLogPage,
+  UserExchangeSettings,
+  UserExchangeSettingsSavePayload,
   TradeTaskLogQuery,
   TradeTaskProfile,
   TradeTaskProfileSavePayload,
   TradeTaskStartPayload,
   TradeTaskStatus,
+  TradeTaskStopPayload,
 } from '@/types/system'
 
 export function fetchSystemSettings() {
@@ -29,6 +32,14 @@ export function fetchSystemDeploymentSettings() {
 
 export function saveSystemDeploymentSettings(payload: SystemDeploymentSettingsSavePayload) {
   return post<SystemDeploymentSettingsSaveResult>('/api/system/deployment-settings/save', payload)
+}
+
+export function fetchUserExchangeSettings(payload: { userId?: number } = {}) {
+  return post<UserExchangeSettings>('/api/system/user-exchange/settings', payload)
+}
+
+export function saveUserExchangeSettings(payload: UserExchangeSettingsSavePayload) {
+  return post<UserExchangeSettings>('/api/system/user-exchange/settings/save', payload)
 }
 
 export function pageSystemLogFiles(payload: {
@@ -59,8 +70,8 @@ export function deleteTradeTaskProfile(id: number) {
   return post<{ deleted: boolean; id: number }>('/api/system/trade-task/profiles/delete', { id })
 }
 
-export function fetchTradeTaskStatus() {
-  return post<TradeTaskStatus>('/api/system/trade-task/status')
+export function fetchTradeTaskStatuses() {
+  return post<TradeTaskStatus[]>('/api/system/trade-task/statuses')
 }
 
 export function pageTradeTaskLogs(payload: TradeTaskLogQuery) {
@@ -71,6 +82,6 @@ export function startTradeTask(payload: TradeTaskStartPayload) {
   return post<TradeTaskStatus>('/api/system/trade-task/start', payload)
 }
 
-export function stopTradeTask() {
-  return post<TradeTaskStatus>('/api/system/trade-task/stop')
+export function stopTradeTask(payload: TradeTaskStopPayload) {
+  return post<TradeTaskStatus>('/api/system/trade-task/stop', payload)
 }

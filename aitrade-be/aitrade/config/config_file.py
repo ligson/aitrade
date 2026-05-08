@@ -265,11 +265,11 @@ def normalize_spot_multi_signal_fusion_config(raw_config: dict[str, Any] | None)
 
 class Config:
     @classmethod
-    def from_yaml(cls, config_file: str, mode: str = 'bot') -> 'Config':
+    def from_yaml(cls, config_file: str, mode: str = 'web') -> 'Config':
         return cls(config_file, mode=mode)
 
     @classmethod
-    def from_dict(cls, config_data: dict[str, Any], mode: str = 'bot') -> 'Config':
+    def from_dict(cls, config_data: dict[str, Any], mode: str = 'web') -> 'Config':
         return cls(copy.deepcopy(config_data), mode=mode)
 
     def __init__(self, config_source, mode: str = 'bot'):
@@ -285,8 +285,8 @@ class Config:
             else:
                 logging.info("%s配置文件不存在", config_file)
             self.config = load_config(config_file)
-        if mode not in {'bot', 'web'}:
-            raise ConfigValidationError("Config mode 只支持 bot 或 web")
+        if mode not in {'web', 'task_runtime'}:
+            raise ConfigValidationError("Config mode 只支持 web 或 task_runtime")
         self.mode = mode
 
         if not isinstance(self.config, dict):
@@ -300,10 +300,10 @@ class Config:
             self.data_root_dir = resolve_data_root_dir(_require_non_empty_string(raw_data_root_dir, 'app.data_root_dir'))
             app_cfg['data_root_dir'] = self.data_root_dir
 
-        # Bot/CLI 直跑要求文件里提供完整 AI 配置；
-        # Web 管理台模式允许这些字段先缺省，后续再由数据库系统设置补齐生效配置。
+        # Web 服务自身启动只要求部署级/系统级配置；
+        # 交易任务真正运行前，仍要求提供完整 AI 配置。
         gpt_raw = app_cfg.get('gpt')
-        if self.mode == 'bot':
+        if self.mode == 'task_runtime':
             gpt_cfg = _require_mapping(gpt_raw, 'app.gpt')
         elif gpt_raw is None:
             logging.debug('Web 模式未在 config.yaml 中提供 app.gpt，后续由系统设置补齐可编辑 AI 参数')
@@ -314,7 +314,7 @@ class Config:
         if self.gpt_provider not in {'deepseek', 'openai'}:
             raise ConfigValidationError("配置项 app.gpt.provider 只支持 deepseek 或 openai")
         gpt_api_key = str(gpt_cfg.get('api_key') or '').strip()
-        if self.mode == 'bot':
+        if self.mode == 'task_runtime':
             self.gpt_api_key = _require_non_empty_string(gpt_api_key, 'app.gpt.api_key')
         else:
             self.gpt_api_key = gpt_api_key
@@ -335,29 +335,46 @@ class Config:
         elif self.proxy_url is not None and not isinstance(self.proxy_url, str):
             raise ConfigValidationError("配置项 app.http_client.proxy_url 必须是字符串")
 
-        exchange_cfg = _require_mapping(app_cfg.get('exchange'), 'app.exchange')
-        self.exchange_type = _require_non_empty_string(exchange_cfg.get('type'), 'app.exchange.type')
-        if self.exchange_type not in {'binance', 'okx'}:
+        exchange_raw = app_cfg.get('exchange')
+        if self.mode == 'task_runtime':
+            exchange_cfg = _require_mapping(exchange_raw, 'app.exchange')
+        elif exchange_raw is None:
+            logging.debug('Web 模式未在 config.yaml 中提供 app.exchange，后续可由用户交易所设置补齐')
+            exchange_cfg = {}
+        else:
+            exchange_cfg = _require_mapping(exchange_raw, 'app.exchange')
+        exchange_type = str(exchange_cfg.get('type') or '').strip().lower()
+        if self.mode == 'task_runtime':
+            self.exchange_type = _require_non_empty_string(exchange_type, 'app.exchange.type')
+        else:
+            self.exchange_type = exchange_type
+        if self.exchange_type and self.exchange_type not in {'binance', 'okx'}:
             raise ConfigValidationError("配置项 app.exchange.type 只支持 binance 或 okx")
-        self.exchange_api_key = _require_non_empty_string(exchange_cfg.get('api_key'), 'app.exchange.api_key')
-        self.exchange_api_secret = _require_non_empty_string(exchange_cfg.get('api_secret'), 'app.exchange.api_secret')
+        exchange_api_key = str(exchange_cfg.get('api_key') or '').strip()
+        exchange_api_secret = str(exchange_cfg.get('api_secret') or '').strip()
+        if self.mode == 'task_runtime':
+            self.exchange_api_key = _require_non_empty_string(exchange_api_key, 'app.exchange.api_key')
+            self.exchange_api_secret = _require_non_empty_string(exchange_api_secret, 'app.exchange.api_secret')
+        else:
+            self.exchange_api_key = exchange_api_key
+            self.exchange_api_secret = exchange_api_secret
         password = exchange_cfg.get('password', '')
         if password is None:
             password = ''
         if not isinstance(password, str):
             raise ConfigValidationError("配置项 app.exchange.password 必须是字符串")
         self.exchange_password = password
-        if self.exchange_type == 'okx' and not self.exchange_password.strip():
+        if self.mode == 'task_runtime' and self.exchange_type == 'okx' and not self.exchange_password.strip():
             raise ConfigValidationError("使用 OKX 时，配置项 app.exchange.password 不能为空")
 
         trade_raw = app_cfg.get('trade')
         trade_cfg = _require_mapping(trade_raw, 'app.trade') if trade_raw is not None else {}
         has_trade_task_fields = any(key in trade_cfg for key in ('trade_mode', 'sandbox_trade', 'symbol', 'timeframe', 'limit', 'strategy'))
-        # Web 场景下的任务级参数会由交易任务配置页和运行快照提供，
-        # 因此这里只在 Bot/CLI 直跑模式下强制要求文件里给出完整任务配置。
-        if self.mode == 'bot' and not has_trade_task_fields:
+        # Web 服务自身启动不要求文件里提供完整任务级配置；
+        # 真实交易任务运行前，必须具备完整的运行态参数。
+        if self.mode == 'task_runtime' and not has_trade_task_fields:
             raise ConfigValidationError(
-                'Bot/CLI 模式要求在 app.trade 中提供任务级配置：trade_mode、symbol、timeframe、limit、strategy'
+                '交易任务运行态要求在 app.trade 中提供任务级配置：trade_mode、symbol、timeframe、limit、strategy'
             )
 
         self.trade_mode = _normalize_trade_mode(trade_cfg)
@@ -391,8 +408,8 @@ class Config:
 
         strategy_raw = trade_cfg.get('strategy')
         if strategy_raw is None:
-            if self.mode == 'bot':
-                raise ConfigValidationError('Bot/CLI 模式要求提供配置项 app.trade.strategy')
+            if self.mode == 'task_runtime':
+                raise ConfigValidationError('交易任务运行态要求提供配置项 app.trade.strategy')
             strategy_cfg = {}
         else:
             strategy_cfg = _require_mapping(strategy_raw, 'app.trade.strategy')

@@ -11,6 +11,9 @@
           <template v-if="column.key === 'status'">
             <a-tag :color="record.status === 'active' ? 'green' : 'red'">{{ record.status }}</a-tag>
           </template>
+          <template v-else-if="column.key === 'isAdmin'">
+            <a-tag :color="record.isAdmin ? 'blue' : 'default'">{{ record.isAdmin ? '管理员' : '普通用户' }}</a-tag>
+          </template>
           <template v-else-if="column.key === 'actions'">
             <a-space wrap>
               <a-button type="link" @click="openEdit(record)">编辑</a-button>
@@ -29,7 +32,7 @@
         <a-form-item label="昵称"><a-input v-model:value="editForm.nickname" /></a-form-item>
         <a-form-item label="备注"><a-input v-model:value="editForm.remark" /></a-form-item>
         <a-form-item v-if="!editingId" label="密码"><a-input-password v-model:value="editForm.password" /></a-form-item>
-        <a-form-item v-if="!editingId" label="管理员">
+        <a-form-item label="管理员">
           <a-switch v-model:checked="editForm.isAdmin" />
         </a-form-item>
       </a-form>
@@ -138,7 +141,13 @@ async function submitUser() {
   submitting.value = true
   try {
     if (editingId.value) {
-      await updateUser({ id: editingId.value, email: editForm.email, nickname: editForm.nickname, remark: editForm.remark })
+      await updateUser({
+        id: editingId.value,
+        email: editForm.email,
+        nickname: editForm.nickname,
+        remark: editForm.remark,
+        isAdmin: editForm.isAdmin,
+      })
       message.success('用户已更新')
     } else {
       await createUser({

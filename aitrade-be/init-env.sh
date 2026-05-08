@@ -75,4 +75,4 @@ printf '项目目录: %s\n' "$ROOT_DIR"
 printf 'Python: %s\n' "$VENV_PYTHON"
 printf '虚拟环境: %s\n' "$VENV_DIR"
 printf '配置文件: %s\n' "$CONFIG_FILE"
-printf '下一步: 先编辑 config.yaml，再执行 bash start.sh\n'
+printf '下一步: 先编辑 config.yaml，再执行 bash start-web.sh\n'

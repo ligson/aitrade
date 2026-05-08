@@ -1,13 +1,6 @@
 app:
-  exchange:
-    # 交易接口类型，可选值：binance、okx
-    type: binance
-    api_key: xxxx
-    # 交易接口密钥
-    api_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    # OKX 交易所需要的密码（仅在使用 OKX 时需要配置）
-    password: your_okx_password
-
+  # Web-only 模式下，交易所类型与凭证由管理台“交易所设置”页按用户维护。
+  # 因此本地 config.yaml 不再要求保留 app.exchange；任务启动时会读取用户配置并冻结到运行快照。
   http_client:
     # 交易所访问与 freqtrade 历史数据下载共用这组代理配置，不配置默认不启用
     proxy_enable: false
@@ -28,8 +21,8 @@ app:
       - http://localhost:5173
 
   trade:
-    # Web 管理台场景下，这里只需要保留 persistence 结构占位。
-    # 如果直接运行 Bot/CLI，再额外补齐 trade_mode / paper_balance / symbol / timeframe / limit / strategy。
+    # Web-only 模式下，这里只需要保留 persistence 结构占位。
+    # 真实交易任务参数由管理台配置，并在启动任务时固化为运行快照。
     persistence: {}
 
   backtest:

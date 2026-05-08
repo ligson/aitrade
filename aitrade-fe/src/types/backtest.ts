@@ -81,6 +81,7 @@ export interface BacktestJobDataSource {
 
 export interface BacktestJobItem {
   id: number
+  ownerUserId: number | null
   strategyType: string
   strategyProfileId: number | null
   profileName: string

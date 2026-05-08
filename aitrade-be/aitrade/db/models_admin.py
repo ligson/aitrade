@@ -46,9 +46,11 @@ class StrategyProfileModel(Base):
     __table_args__ = (
         Index('idx_strategy_profiles_type', 'strategy_type'),
         Index('idx_strategy_profiles_enabled', 'enabled'),
+        Index('idx_strategy_profiles_owner_created_at', 'owner_user_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     strategy_type: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(Text, default='')
@@ -64,9 +66,11 @@ class SignalSourceProfileModel(Base):
     __table_args__ = (
         Index('idx_signal_source_profiles_type', 'source_type'),
         Index('idx_signal_source_profiles_enabled', 'enabled'),
+        Index('idx_signal_source_profiles_owner_created_at', 'owner_user_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     source_type: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(Text, default='')
@@ -89,5 +93,21 @@ class SystemSettingProfileModel(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     params_json: Mapped[str] = mapped_column(Text, nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class UserExchangeSettingModel(Base):
+    __tablename__ = 'user_exchange_settings'
+    __table_args__ = (
+        Index('idx_user_exchange_settings_owner', 'owner_user_id', unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    exchange_type: Mapped[str] = mapped_column(String, nullable=False)
+    api_key: Mapped[str] = mapped_column(Text, nullable=False, default='')
+    api_secret: Mapped[str] = mapped_column(Text, nullable=False, default='')
+    password: Mapped[str] = mapped_column(Text, nullable=False, default='')
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)

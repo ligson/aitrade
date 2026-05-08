@@ -95,6 +95,7 @@ class UserService:
             model.email = payload['email'].strip()
             model.nickname = payload['nickname'].strip()
             model.remark = payload.get('remark', '').strip()
+            model.is_admin = bool(payload.get('isAdmin', False))
             model.updated_at = datetime.now(timezone.utc).isoformat()
             session.commit()
             session.refresh(model)

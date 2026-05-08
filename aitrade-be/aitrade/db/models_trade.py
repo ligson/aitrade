@@ -21,9 +21,11 @@ class TradeRecordModel(Base):
         Index('idx_trade_records_result_created_at', 'result', 'created_at'),
         Index('idx_trade_records_run_created_at', 'run_id', 'created_at'),
         Index('idx_trade_records_profile_created_at', 'trade_task_profile_id', 'created_at'),
+        Index('idx_trade_records_owner_created_at', 'owner_user_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     run_id: Mapped[Optional[int]] = mapped_column(Integer)
     trade_task_profile_id: Mapped[Optional[int]] = mapped_column(Integer)
@@ -66,7 +68,11 @@ class TradeRecordModel(Base):
 
 class PositionStateModel(Base):
     __tablename__ = 'position_state'
+    __table_args__ = (
+        Index('idx_position_state_owner_updated_at', 'owner_user_id', 'updated_at'),
+    )
 
+    owner_user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     symbol: Mapped[str] = mapped_column(String, primary_key=True)
     strategy: Mapped[Optional[str]] = mapped_column(String)
     entry_time: Mapped[Optional[str]] = mapped_column(String)

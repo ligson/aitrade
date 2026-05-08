@@ -42,6 +42,7 @@ class TradingBot:
             proxies={'http': config.proxy_url, 'https': config.proxy_url} if config.proxy_enable else None,
             persistence_config=config.trade_persistence_config,
             paper_balance=config.trade_paper_balance,
+            owner_user_id=self.execution_context.get('owner_user_id'),
         )
 
         logging.info("初始化风险管理器")

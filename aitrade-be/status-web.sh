@@ -64,10 +64,20 @@ pid_command() {
     ps -p "$pid" -o command= 2>/dev/null || true
 }
 
+process_cwd() {
+    local pid="$1"
+
+    if [ "$HAS_LSOF" -ne 1 ]; then
+        return 0
+    fi
+
+    lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | grep '^n' | head -n 1 | cut -c2- || true
+}
+
 process_matches() {
     local pid="$1"
     local cmdline
-    local expected_python="${PYTHON_BIN:-$VENV_PYTHON}"
+    local process_root
 
     if ! ps -p "$pid" >/dev/null 2>&1; then
         return 1
@@ -77,8 +87,16 @@ process_matches() {
     if [ -z "$cmdline" ]; then
         return 1
     fi
+    if [[ "$cmdline" != *"-m aitrade.web_runner"* ]]; then
+        return 1
+    fi
 
-    [[ "$cmdline" == *"$expected_python"* && "$cmdline" == *"-m aitrade.web_runner"* ]]
+    process_root=$(process_cwd "$pid")
+    if [ -n "$process_root" ] && [ "$process_root" != "$ROOT_DIR" ]; then
+        return 1
+    fi
+
+    return 0
 }
 
 port_listener_pid() {
@@ -89,6 +107,25 @@ port_listener_pid() {
     fi
 
     lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true
+}
+
+write_runtime_files() {
+    local pid="$1"
+    local started_at="$2"
+
+    mkdir -p "$RUNTIME_DIR"
+    cat > "$RUNTIME_FILE" <<EOF
+PID=$pid
+STARTED_AT=$started_at
+REPO_ROOT=$ROOT_DIR
+PYTHON_BIN=$VENV_PYTHON
+CONFIG_PATH=$ROOT_DIR/config.yaml
+LOG_DIR=$LOG_DIR
+LAUNCHER_LOG=$LOG_DIR/web-launcher.log
+WEB_HOST=$WEB_HOST
+WEB_PORT=$WEB_PORT
+EOF
+    printf '%s\n' "$pid" > "$PID_FILE"
 }
 
 resolve_configured_endpoint() {
@@ -164,6 +201,21 @@ if [ ! -f "$PID_FILE" ] && [ ! -f "$RUNTIME_FILE" ]; then
     fi
 
     if [ -n "$ORPHAN_LISTENER_PID" ]; then
+        if process_matches "$ORPHAN_LISTENER_PID"; then
+            warn "检测到运行态文件缺失，已按监听端口自动重建 Web 运行态。"
+            write_runtime_files "$ORPHAN_LISTENER_PID" "unknown"
+            info "当前状态: running"
+            printf 'PID: %s\n' "$ORPHAN_LISTENER_PID"
+            printf '启动时间: unknown\n'
+            printf '访问地址: http://%s:%s\n' "$WEB_HOST" "$WEB_PORT"
+            printf '项目目录: %s\n' "$ROOT_DIR"
+            printf '配置文件: %s\n' "$ROOT_DIR/config.yaml"
+            print_log_info
+            print_listener_info
+            printf '启动辅助日志: %s\n' "$LOG_DIR/web-launcher.log"
+            exit 0
+        fi
+
         warn "当前状态: stale"
         warn "原因：运行态文件缺失，但目标端口仍有监听进程。"
         printf '项目目录: %s\n' "$ROOT_DIR"

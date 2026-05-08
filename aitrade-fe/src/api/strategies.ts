@@ -1,13 +1,13 @@
 import { post } from './http'
 import type { SignalSourceDefinition, SignalSourceProfile } from '@/types/signalSource'
-import type { StrategyDefinition, StrategyProfile } from '@/types/strategy'
+import type { StrategyDefinition, StrategyProfile, StrategyProfileListResult } from '@/types/strategy'
 
 export function fetchStrategyDefinitions() {
   return post<StrategyDefinition[]>('/api/strategies/definitions')
 }
 
 export function fetchStrategyProfiles() {
-  return post<StrategyProfile[]>('/api/strategies/list')
+  return post<StrategyProfileListResult>('/api/strategies/list')
 }
 
 export function saveStrategyProfile(payload: {

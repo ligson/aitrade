@@ -32,6 +32,7 @@ class TradeExecutor:
         proxies: Dict[str, str] = None,
         persistence_config: Optional[Dict[str, Any]] = None,
         paper_balance: Optional[float] = None,
+        owner_user_id: Optional[int] = None,
     ):
         ccxt_cfg = {
             'apiKey': api_key,
@@ -68,6 +69,7 @@ class TradeExecutor:
         self.sandbox = sandbox
         self.trade_mode = trade_mode
         self.paper_balance = float(paper_balance if paper_balance is not None else DEFAULT_PAPER_BALANCE)
+        self.owner_user_id = int(owner_user_id or 0)
         self.position = None
         self.trade_log = []
         self.trade_logger = logging.getLogger('trade')
@@ -103,7 +105,11 @@ class TradeExecutor:
         if self.store is None or not self.persist_position:
             return None
 
-        stored_position = self.store.get_position_state(symbol)
+        if self.owner_user_id <= 0:
+            logging.warning("当前缺少 owner_user_id，跳过本地持仓恢复: symbol=%s", symbol)
+            return None
+
+        stored_position = self.store.get_position_state(self.owner_user_id, symbol)
         if stored_position is None:
             logging.info("未找到可恢复的本地持仓: %s", symbol)
             return None
@@ -456,6 +462,7 @@ class TradeExecutor:
             return None
 
         record = {
+            'owner_user_id': self.owner_user_id if self.owner_user_id > 0 else None,
             'created_at': self._utc_now(),
             'run_id': run_id,
             'trade_task_profile_id': trade_task_profile_id,
@@ -601,12 +608,18 @@ class TradeExecutor:
     def _persist_position_state(self, symbol: str, position: Optional[Dict[str, Any]], source_trade_id: Optional[int] = None) -> None:
         if self.store is None or not self.persist_position or position is None:
             return
-        self.store.upsert_position_state(symbol, position, source_trade_id)
+        if self.owner_user_id <= 0:
+            logging.warning("当前缺少 owner_user_id，跳过持仓快照持久化: symbol=%s", symbol)
+            return
+        self.store.upsert_position_state(self.owner_user_id, symbol, position, source_trade_id)
 
     def _delete_position_state(self, symbol: str) -> None:
         if self.store is None or not self.persist_position:
             return
-        self.store.delete_position_state(symbol)
+        if self.owner_user_id <= 0:
+            logging.warning("当前缺少 owner_user_id，跳过持仓快照删除: symbol=%s", symbol)
+            return
+        self.store.delete_position_state(self.owner_user_id, symbol)
 
     @staticmethod
     def _snapshot_position(position: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

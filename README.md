@@ -1,52 +1,65 @@
 # aitrade
 
-这是一个前后端并存的交易系统仓库。
+这是一个前后端并存的 Web 化自动交易系统仓库。
 
-当前目录结构：
+## 目录结构
 
-- `aitrade-be/`：Python 后端，包含交易机器人、FastAPI Web API、配置模板、运行脚本与打包脚本
-- `aitrade-fe/`：Vue 3 管理后台，包含登录、用户维护、交易日志查询、策略配置、历史数据管理、策略回测与普通用户帮助中心页面
+- `aitrade-be/`：Python 后端，提供 FastAPI Web API、交易任务运行内核、配置模板、运维脚本与打包脚本
+- `aitrade-fe/`：Vue 3 管理台，提供登录、系统设置、交易任务、任务日志、交易日志、策略配置、历史数据与回测页面
 
-## 仓库入口
+## 当前运行模式
 
-如果你希望继续在仓库根目录操作，可以直接使用兼容入口：
+仓库现已收敛为 **Web-only**：
+
+- 后端唯一运行入口：`python -m aitrade.web_runner`
+- 后端后台脚本：`bash start-web.sh / status-web.sh / stop-web.sh`
+- 真实交易任务由 Web 管理台发起、停止和查看状态
+- 不再支持独立 `python -m aitrade` 或 `bash start.sh / status.sh / stop.sh` 的 Bot/CLI 直跑模式
+
+## 常用命令
+
+如果继续在仓库根目录操作，推荐：
 
 ```bash
 bash init-env.sh
-bash start.sh
-bash status.sh
-bash stop.sh
-bash query-trades.sh latest 20
 bash package.sh
+bash query-trades.sh latest 20
+bash deploy.sh chenws-japan
 ```
 
-这些脚本会自动转发到 `aitrade-be/`，因此后端运行态也会统一落在 `aitrade-be/` 下。
+说明：
+- `init-env.sh` 会转发到 `aitrade-be/` 初始化后端环境
+- Web 服务控制脚本位于 `aitrade-be/`：`start-web.sh / status-web.sh / stop-web.sh`
+- `query-trades.sh` 仍可用于本地查询结构化交易记录
 
-如果需要后端的详细初始化、运行、配置和架构说明，请查看：
+## 运行态目录边界
 
-- `aitrade-be/README.md`
-- `aitrade-be/CLAUDE.md`
+后端程序目录保持在 `aitrade-be/`：
 
-## 运行态目录
+- `config.yaml`
+- `.venv/`
+- `.aitrade/`（PID 等程序控制运行态）
+- `logs/`（shell 启动辅助日志）
+- `dist/`
 
-后端相关运行文件现在统一位于 `aitrade-be/`：
+后端业务数据默认按 `app.data_root_dir`（默认 `~/.aitrade`）自动派生：
 
-- 配置文件：`aitrade-be/config.yaml`
-- 虚拟环境：`aitrade-be/.venv/`
-- 运行态：`aitrade-be/.aitrade/`
-- 日志：`aitrade-be/logs/`
-- 数据库：`aitrade-be/.aitrade/trades.sqlite3`
-- 打包产物：`aitrade-be/dist/`
+- SQLite：`~/.aitrade/trades.sqlite3`
+- Python 应用日志：`~/.aitrade/logs`
+- 历史数据：`~/.aitrade/backtest-data`
+- Freqtrade `user_data`：`~/.aitrade/freqtrade-user-data`
 
-## 文档分层
+## 文档入口
 
-- 仓库级说明：当前 `README.md` 与根目录 `CLAUDE.md`
-- 架构与模块文档：`docs/architecture.md`、`docs/backend.md`、`docs/frontend.md`、`docs/api.md`、`docs/operations.md`
-- 后端详细说明：`aitrade-be/README.md` 与 `aitrade-be/CLAUDE.md`
+- 后端运行与实现说明：`aitrade-be/README.md`
+- 后端协作约束：`aitrade-be/CLAUDE.md`
+- 架构说明：`docs/architecture.md`
+- 后端说明：`docs/backend.md`
+- 运维说明：`docs/operations.md`
 
 ## 当前状态
 
-- 后端已经迁移到 `aitrade-be/`
-- 前端管理台已经落地在 `aitrade-fe/`，技术栈为 `pnpm + TypeScript + Vue 3 + Vite + ant-design-vue`
-- Web 管理台当前覆盖登录（账户/密码/图形验证码）、用户维护、交易日志查询、策略配置、历史数据管理、策略回测，以及面向普通用户的帮助中心
-- 前后端本地联调默认复用 `http://127.0.0.1:5173 -> http://127.0.0.1:18081`；后端运行态、日志、数据库与打包产物统一收敛在 `aitrade-be/` 下，仓库根目录不再保留新的 `.aitrade/`、`logs/`、`dist/` 等后端运行文件
+- 本地联调默认复用 `http://127.0.0.1:5173 -> http://127.0.0.1:18081`
+- 远端正式部署当前默认仍使用后端 `18080`
+- Web 服务启动后不会自动运行交易任务；任务需在管理台中显式开始
+- 任务运行时会基于系统设置与所选任务配置生成运行快照，运行中不会回读页面后续修改

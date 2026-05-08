@@ -61,6 +61,41 @@ export interface SystemSettingsSavePayload {
   description?: string
 }
 
+export interface UserExchangeSettingsEditable {
+  exchangeType: string
+  apiKey: string
+  apiSecret: string
+  password: string
+  hasApiKey: boolean
+  hasApiSecret: boolean
+  hasPassword: boolean
+  apiKeyMasked: string
+  apiSecretMasked: string
+  passwordMasked: string
+}
+
+export interface UserExchangeSettingsMeta {
+  userId: number
+  username: string
+  nickname: string
+  isAdmin: boolean
+  updatedAt: string | null
+}
+
+export interface UserExchangeSettings {
+  editable: UserExchangeSettingsEditable
+  meta: UserExchangeSettingsMeta
+}
+
+export interface UserExchangeSettingsSavePayload {
+  editable: {
+    exchangeType: string
+    apiKey: string
+    apiSecret: string
+    password: string
+  }
+}
+
 export interface SystemDeploymentSettingsEditable {
   dataRootDir: string
 }
@@ -94,6 +129,7 @@ export interface SystemDeploymentSettingsSaveResult extends SystemDeploymentSett
 
 export interface TradeTaskLogItem {
   id: number
+  ownerUserId: number | null
   runId: number | null
   profileName: string
   runnerName: string
@@ -107,6 +143,7 @@ export interface TradeTaskLogItem {
 export interface TradeTaskRunItem {
   // snapshot 是启动瞬间固化下来的运行快照，用于排障和审计，不会随着 profile 更新而回写变化。
   id: number
+  ownerUserId: number | null
   runnerName: string
   tradeTaskProfileId: number | null
   profileName: string
@@ -136,6 +173,7 @@ export interface TradeTaskRunItem {
 // 这是当前 runner 的运行时状态视图，不等同于某一次 run 的最终历史记录。
 export interface TradeTaskStatus {
   runnerName: string
+  ownerUserId: number | null
   runId: number | null
   tradeTaskProfileId: number | null
   profileName: string
@@ -163,6 +201,7 @@ export interface TradeTaskStatus {
 
 export interface TradeTaskProfile {
   id: number
+  ownerUserId: number | null
   name: string
   description: string
   enabled: boolean
@@ -198,11 +237,15 @@ export interface TradeTaskProfileSavePayload {
   slippageRate: number
   dailyLossStopEnabled: boolean
   dailyLossStopThreshold: number
-  runnerName: string
+  runnerName?: string
 }
 
 export interface TradeTaskStartPayload {
   tradeTaskProfileId: number
+}
+
+export interface TradeTaskStopPayload {
+  runnerName: string
 }
 
 export interface TradeTaskLogQuery {

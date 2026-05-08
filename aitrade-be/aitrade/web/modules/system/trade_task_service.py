@@ -18,12 +18,16 @@ from sqlalchemy import text
 from ....config.config_file import Config
 from ....config.config_file import ConfigValidationError
 from ....db import Base
+from ....db import PositionStateModel
 from ....db import SignalSourceProfileModel
 from ....db import StrategyProfileModel
+from ....db import TradeRecordModel
 from ....db import TradeTaskLogModel
 from ....db import TradeTaskProfileModel
 from ....db import TradeTaskRunModel
 from ....db import TradeTaskRuntimeModel
+from ....db import UserExchangeSettingModel
+from ....db import UserModel
 from ....db.session import get_engine
 from ....db.session import get_session_factory
 from ....trade.strategies.fusion_profile import build_fusion_runtime_params
@@ -32,10 +36,15 @@ from ....trade.strategies.fusion_profile import summarize_fusion_strategy_profil
 from ....trade.strategies.registry import get_strategy_definition
 from ....trade.trade import OptimizedCryptoBot
 from ....trade.trading_system.trade_executor import TradingHaltError
+from ...dependencies import apply_owner_scope
+from ...dependencies import ensure_owner_access
+from ...dependencies import get_primary_admin_user_id
+from ...dependencies import is_admin_user
 from ...exceptions import NotFoundError
 from ...exceptions import ValidationError
 from ..strategies.params import normalize_strategy_params
 from .service import SystemService
+from .user_exchange_service import UserExchangeService
 
 STATUS_STOPPED = 'stopped'
 STATUS_STARTING = 'starting'
@@ -48,6 +57,7 @@ STATUS_STALE = 'stale'
 # stale 表示数据库残留了活跃状态，但当前 Web 进程里已经没有对应线程。
 ACTIVE_STATUSES = {STATUS_STARTING, STATUS_RUNNING, STATUS_STOP_REQUESTED}
 DEFAULT_RUNNER_NAME = 'default'
+RUNNER_NAME_PREFIX = 'trade-task-profile-'
 DEFAULT_LOG_LIMIT = 20
 TRADE_MODES = {'live', 'sandbox', 'paper'}
 
@@ -63,11 +73,13 @@ class TradeTaskService:
         self.engine = get_engine(self.database_url)
         self.Session = get_session_factory(self.database_url)
         self.system_service = SystemService(config)
+        self.user_exchange_service = UserExchangeService(config)
         self._lock = Lock()
-        self._thread: Thread | None = None
-        self._stop_event = Event()
+        self._threads: dict[str, Thread] = {}
+        self._stop_events: dict[str, Event] = {}
         Base.metadata.create_all(self.engine)
         self._ensure_trade_task_runtime_schema()
+        self._ensure_profile_runner_names()
         self._mark_stale_if_needed()
 
     @classmethod
@@ -84,16 +96,76 @@ class TradeTaskService:
                 instance.config = config
             return instance
 
-    def list_profiles(self) -> list[dict[str, Any]]:
+    @staticmethod
+    def _build_profile_runner_name(profile_id: int) -> str:
+        return f'{RUNNER_NAME_PREFIX}{profile_id}'
+
+    def _ensure_profile_runner_names(self) -> None:
+        with self.Session() as session:
+            profiles = session.query(TradeTaskProfileModel).order_by(TradeTaskProfileModel.id.asc()).all()
+            legacy_runtime = session.get(TradeTaskRuntimeModel, DEFAULT_RUNNER_NAME)
+            changed = False
+            for profile in profiles:
+                normalized_runner_name = str(profile.runner_name or '').strip()
+                if normalized_runner_name and normalized_runner_name != DEFAULT_RUNNER_NAME:
+                    continue
+                new_runner_name = self._build_profile_runner_name(profile.id)
+                logging.info(
+                    '回填交易任务 runner 名称: profile_id=%s old_runner=%s new_runner=%s',
+                    profile.id,
+                    normalized_runner_name or DEFAULT_RUNNER_NAME,
+                    new_runner_name,
+                )
+                profile.runner_name = new_runner_name
+                changed = True
+                if (
+                    legacy_runtime is not None
+                    and legacy_runtime.runner_name == DEFAULT_RUNNER_NAME
+                    and legacy_runtime.trade_task_profile_id == profile.id
+                ):
+                    session.add(
+                        TradeTaskRuntimeModel(
+                            runner_name=new_runner_name,
+                            run_id=legacy_runtime.run_id,
+                            trade_task_profile_id=legacy_runtime.trade_task_profile_id,
+                            profile_name=legacy_runtime.profile_name,
+                            status=legacy_runtime.status,
+                            started_at=legacy_runtime.started_at,
+                            stopped_at=legacy_runtime.stopped_at,
+                            stop_requested_at=legacy_runtime.stop_requested_at,
+                            last_heartbeat_at=legacy_runtime.last_heartbeat_at,
+                            last_cycle_started_at=legacy_runtime.last_cycle_started_at,
+                            last_cycle_finished_at=legacy_runtime.last_cycle_finished_at,
+                            next_run_at=legacy_runtime.next_run_at,
+                            last_error=legacy_runtime.last_error,
+                            started_by=legacy_runtime.started_by,
+                            symbol=legacy_runtime.symbol,
+                            timeframe=legacy_runtime.timeframe,
+                            timeframe_minutes=legacy_runtime.timeframe_minutes,
+                            strategy_type=legacy_runtime.strategy_type,
+                            updated_at=legacy_runtime.updated_at,
+                        )
+                    )
+                    session.delete(legacy_runtime)
+                    legacy_runtime = None
+            if changed:
+                session.commit()
+
+    def list_profiles(self, current_user: dict[str, Any]) -> list[dict[str, Any]]:
         with self.Session() as session:
             strategy_profiles = {
                 item.id: item
-                for item in session.query(StrategyProfileModel).order_by(StrategyProfileModel.id.asc()).all()
+                for item in apply_owner_scope(
+                    session.query(StrategyProfileModel),
+                    StrategyProfileModel,
+                    current_user,
+                ).order_by(StrategyProfileModel.id.asc()).all()
             }
-            models = session.query(TradeTaskProfileModel).order_by(TradeTaskProfileModel.id.asc()).all()
+            query = apply_owner_scope(session.query(TradeTaskProfileModel), TradeTaskProfileModel, current_user)
+            models = query.order_by(TradeTaskProfileModel.id.asc()).all()
             return [self._serialize_profile(model, strategy_profiles.get(model.strategy_profile_id)) for model in models]
 
-    def save_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def save_profile(self, payload: dict[str, Any], current_user: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get('name') or '').strip()
         if not name:
             raise ValidationError('交易任务配置名称不能为空')
@@ -113,9 +185,6 @@ class TradeTaskService:
         daily_loss_stop_threshold = self._normalize_non_negative_float(payload.get('dailyLossStopThreshold'), '单日亏损停机阈值')
         if daily_loss_stop_enabled and daily_loss_stop_threshold <= 0:
             raise ValidationError('启用单日亏损停机时，阈值必须大于 0')
-        runner_name = str(payload.get('runnerName') or DEFAULT_RUNNER_NAME).strip() or DEFAULT_RUNNER_NAME
-        if runner_name != DEFAULT_RUNNER_NAME:
-            raise ValidationError('当前仅支持 default runner')
         enabled = bool(payload.get('enabled', True))
         description = str(payload.get('description') or '').strip()
         trade_mode = self._normalize_trade_mode_payload(payload)
@@ -124,9 +193,24 @@ class TradeTaskService:
         now = self._now_iso()
 
         with self.Session() as session:
+            owner_user_id = int(current_user.get('id') or 0)
+            if owner_user_id <= 0:
+                raise ValidationError('当前用户信息无效')
+            if profile_id is None:
+                target_owner_user_id = owner_user_id
+                model = None
+            else:
+                model = session.get(TradeTaskProfileModel, int(profile_id))
+                if model is None:
+                    raise NotFoundError('交易任务配置不存在')
+                ensure_owner_access(current_user, model.owner_user_id)
+                target_owner_user_id = int(model.owner_user_id or owner_user_id)
             strategy_profile = session.get(StrategyProfileModel, strategy_profile_id)
             if strategy_profile is None:
                 raise NotFoundError('策略配置不存在')
+            ensure_owner_access(current_user, strategy_profile.owner_user_id)
+            if int(strategy_profile.owner_user_id or 0) != target_owner_user_id:
+                raise ValidationError('交易任务只能引用所属用户自己的策略配置')
             if not strategy_profile.enabled:
                 raise ValidationError('所选策略配置已停用')
             if strategy_profile.strategy_type == 'btc_spot_trend_breakout' and timeframe != '1h':
@@ -140,7 +224,8 @@ class TradeTaskService:
 
             if profile_id is None:
                 logging.info(
-                    '创建交易任务配置: name=%s symbol=%s timeframe=%s strategy_profile_id=%s trade_mode=%s',
+                    '创建交易任务配置: owner_user_id=%s name=%s symbol=%s timeframe=%s strategy_profile_id=%s trade_mode=%s',
+                    target_owner_user_id,
                     name,
                     symbol,
                     timeframe,
@@ -148,6 +233,7 @@ class TradeTaskService:
                     trade_mode,
                 )
                 model = TradeTaskProfileModel(
+                    owner_user_id=target_owner_user_id,
                     name=name,
                     description=description,
                     enabled=enabled,
@@ -162,16 +248,19 @@ class TradeTaskService:
                     slippage_rate=slippage_rate,
                     daily_loss_stop_enabled=daily_loss_stop_enabled,
                     daily_loss_stop_threshold=daily_loss_stop_threshold,
-                    runner_name=runner_name,
+                    runner_name=DEFAULT_RUNNER_NAME,
                     created_at=now,
                     updated_at=now,
                 )
                 session.add(model)
                 session.commit()
+                model.runner_name = self._build_profile_runner_name(model.id)
+                session.commit()
                 session.refresh(model)
             else:
                 logging.info(
-                    '更新交易任务配置: id=%s name=%s symbol=%s timeframe=%s strategy_profile_id=%s trade_mode=%s',
+                    '更新交易任务配置: owner_user_id=%s id=%s name=%s symbol=%s timeframe=%s strategy_profile_id=%s trade_mode=%s',
+                    target_owner_user_id,
                     profile_id,
                     name,
                     symbol,
@@ -179,9 +268,6 @@ class TradeTaskService:
                     strategy_profile_id,
                     trade_mode,
                 )
-                model = session.get(TradeTaskProfileModel, int(profile_id))
-                if model is None:
-                    raise NotFoundError('交易任务配置不存在')
                 model.name = name
                 model.description = description
                 model.enabled = enabled
@@ -196,55 +282,199 @@ class TradeTaskService:
                 model.slippage_rate = slippage_rate
                 model.daily_loss_stop_enabled = daily_loss_stop_enabled
                 model.daily_loss_stop_threshold = daily_loss_stop_threshold
-                model.runner_name = runner_name
+                if not str(model.runner_name or '').strip() or model.runner_name == DEFAULT_RUNNER_NAME:
+                    model.runner_name = self._build_profile_runner_name(model.id)
                 model.updated_at = now
                 session.commit()
                 session.refresh(model)
             return self._serialize_profile(model, strategy_profile)
 
-    def delete_profile(self, profile_id: int) -> dict[str, Any]:
+    def delete_profile(self, profile_id: int, current_user: dict[str, Any]) -> dict[str, Any]:
         with self.Session() as session:
             model = session.get(TradeTaskProfileModel, profile_id)
             if model is None:
                 raise NotFoundError('交易任务配置不存在')
-            runtime = session.get(TradeTaskRuntimeModel, model.runner_name)
-            if runtime is not None and runtime.trade_task_profile_id == model.id and runtime.status in ACTIVE_STATUSES:
-                logging.warning('拒绝删除运行中的交易任务配置: profile_id=%s runtime_status=%s', profile_id, runtime.status)
+            ensure_owner_access(current_user, model.owner_user_id)
+            runtimes = self._find_profile_runtimes(session, model.id, model.runner_name)
+            active_runtime = next((item for item in runtimes if item.status in ACTIVE_STATUSES), None)
+            if active_runtime is not None:
+                logging.warning('拒绝删除运行中的交易任务配置: profile_id=%s runtime_status=%s', profile_id, active_runtime.status)
                 raise ValidationError('当前交易任务正在使用该配置，不能删除')
-            logging.info('删除交易任务配置: profile_id=%s name=%s', model.id, model.name)
-            session.delete(model)
+            summary = self._delete_profile_related_data(session, model, runtimes)
+            logging.info('删除交易任务配置及关联数据: profile_id=%s name=%s summary=%s', model.id, model.name, summary)
             session.commit()
         return {'deleted': True, 'id': profile_id}
 
-    def get_status(self) -> dict[str, Any]:
+    def _find_profile_runtimes(
+        self,
+        session,
+        profile_id: int,
+        runner_name: str,
+    ) -> list[TradeTaskRuntimeModel]:
+        normalized_runner_name = str(runner_name or '').strip()
+        runtime_models = session.query(TradeTaskRuntimeModel).filter(
+            or_(
+                TradeTaskRuntimeModel.trade_task_profile_id == profile_id,
+                TradeTaskRuntimeModel.runner_name == normalized_runner_name,
+            )
+        ).all()
+        return runtime_models
+
+    def _collect_profile_run_ids(
+        self,
+        session,
+        profile_id: int,
+        runner_name: str,
+        runtime_models: list[TradeTaskRuntimeModel],
+    ) -> list[int]:
+        normalized_runner_name = str(runner_name or '').strip()
+        run_ids = {
+            item.id
+            for item in session.query(TradeTaskRunModel).filter(
+                or_(
+                    TradeTaskRunModel.trade_task_profile_id == profile_id,
+                    TradeTaskRunModel.runner_name == normalized_runner_name,
+                )
+            ).all()
+        }
+        run_ids.update(item.run_id for item in runtime_models if item.run_id is not None)
+        return sorted(run_ids)
+
+    def _collect_profile_trade_record_ids(self, session, profile_id: int, run_ids: list[int]) -> list[int]:
+        filters = [TradeRecordModel.trade_task_profile_id == profile_id]
+        if run_ids:
+            filters.append(TradeRecordModel.run_id.in_(run_ids))
+        trade_record_ids = {
+            item.id
+            for item in session.query(TradeRecordModel).filter(or_(*filters)).all()
+        }
+        return sorted(trade_record_ids)
+
+    def _delete_profile_owned_position_states(self, session, owner_user_id: int | None, trade_record_ids: list[int]) -> int:
+        if not trade_record_ids or owner_user_id is None:
+            return 0
+        return session.query(PositionStateModel).filter(
+            PositionStateModel.owner_user_id == owner_user_id,
+            PositionStateModel.source_trade_id.in_(trade_record_ids),
+        ).delete(synchronize_session=False)
+
+    def _delete_profile_related_data(
+        self,
+        session,
+        profile: TradeTaskProfileModel,
+        runtime_models: list[TradeTaskRuntimeModel],
+    ) -> dict[str, int]:
+        run_ids = self._collect_profile_run_ids(session, profile.id, profile.runner_name, runtime_models)
+        trade_record_ids = self._collect_profile_trade_record_ids(session, profile.id, run_ids)
+        deleted_position_states = self._delete_profile_owned_position_states(session, profile.owner_user_id, trade_record_ids)
+        log_filters = [TradeTaskLogModel.runner_name == profile.runner_name]
+        if run_ids:
+            log_filters.append(TradeTaskLogModel.run_id.in_(run_ids))
+        deleted_logs = session.query(TradeTaskLogModel).filter(or_(*log_filters)).delete(synchronize_session=False)
+        trade_record_filters = [TradeRecordModel.trade_task_profile_id == profile.id]
+        if run_ids:
+            trade_record_filters.append(TradeRecordModel.run_id.in_(run_ids))
+        deleted_trade_records = session.query(TradeRecordModel).filter(or_(*trade_record_filters)).delete(synchronize_session=False)
+        runtime_filters = [TradeTaskRuntimeModel.trade_task_profile_id == profile.id, TradeTaskRuntimeModel.runner_name == profile.runner_name]
+        deleted_runtime = session.query(TradeTaskRuntimeModel).filter(or_(*runtime_filters)).delete(synchronize_session=False)
+        run_filters = [TradeTaskRunModel.trade_task_profile_id == profile.id, TradeTaskRunModel.runner_name == profile.runner_name]
+        if run_ids:
+            run_filters.append(TradeTaskRunModel.id.in_(run_ids))
+        deleted_runs = session.query(TradeTaskRunModel).filter(or_(*run_filters)).delete(synchronize_session=False)
+        session.delete(profile)
+        return {
+            'positionStates': deleted_position_states,
+            'taskLogs': deleted_logs,
+            'tradeRecords': deleted_trade_records,
+            'runtimeRows': deleted_runtime,
+            'runs': deleted_runs,
+        }
+
+    def list_statuses(self, current_user: dict[str, Any]) -> list[dict[str, Any]]:
         with self._lock:
-            model = self._get_or_create_runtime()
-            runtime = self._serialize_runtime(model)
-            if runtime['status'] in ACTIVE_STATUSES and not self._is_thread_active():
-                runtime = self._mark_stale_runtime(model)
-        payload = dict(runtime)
-        payload['recentLogs'] = self.list_logs(limit=DEFAULT_LOG_LIMIT, run_id=payload.get('runId'))
-        payload['currentRun'] = self.get_run_detail(payload['runId']) if payload.get('runId') else None
-        return payload
+            with self.Session() as session:
+                profile_models = apply_owner_scope(
+                    session.query(TradeTaskProfileModel),
+                    TradeTaskProfileModel,
+                    current_user,
+                ).order_by(TradeTaskProfileModel.id.asc()).all()
+                runtime_models = {
+                    item.runner_name: self._clone_model(item)
+                    for item in apply_owner_scope(
+                        session.query(TradeTaskRuntimeModel),
+                        TradeTaskRuntimeModel,
+                        current_user,
+                    ).order_by(TradeTaskRuntimeModel.runner_name.asc()).all()
+                }
+            rows: list[dict[str, Any]] = []
+            for profile in profile_models:
+                runner_name = str(profile.runner_name or self._build_profile_runner_name(profile.id)).strip()
+                model = runtime_models.pop(runner_name, None) or self._build_runtime_placeholder(runner_name, profile)
+                if model.status in ACTIVE_STATUSES and not self._is_thread_active(runner_name):
+                    runtime_payload = self._mark_stale_runtime(model, runner_name)
+                else:
+                    runtime_payload = self._serialize_runtime(model)
+                rows.append(self._wrap_status_payload(runtime_payload, runner_name=runner_name))
+            for runner_name, model in runtime_models.items():
+                if self._should_hide_orphan_runtime(model):
+                    continue
+                if model.status in ACTIVE_STATUSES and not self._is_thread_active(runner_name):
+                    runtime_payload = self._mark_stale_runtime(model, runner_name)
+                else:
+                    runtime_payload = self._serialize_runtime(model)
+                rows.append(self._wrap_status_payload(runtime_payload, runner_name=runner_name))
+            rows.sort(key=lambda item: (0 if item['tradeTaskProfileId'] is not None else 1, item['tradeTaskProfileId'] or 10**12, item['runnerName']))
+            return rows
+
+    def get_status(self, runner_name: str, current_user: dict[str, Any]) -> dict[str, Any]:
+        normalized_runner_name = str(runner_name or '').strip()
+        if not normalized_runner_name:
+            raise ValidationError('runnerName 不能为空')
+        with self._lock:
+            with self.Session() as session:
+                profile = session.query(TradeTaskProfileModel).filter(TradeTaskProfileModel.runner_name == normalized_runner_name).first()
+                if profile is not None:
+                    ensure_owner_access(current_user, profile.owner_user_id)
+            model = self._get_or_create_runtime(normalized_runner_name)
+            if model.trade_task_profile_id is None and model.owner_user_id is not None:
+                ensure_owner_access(current_user, model.owner_user_id)
+            if profile is not None and model.trade_task_profile_id is None:
+                model = self._build_runtime_placeholder(normalized_runner_name, profile)
+            if model.status in ACTIVE_STATUSES and not self._is_thread_active(normalized_runner_name):
+                runtime_payload = self._mark_stale_runtime(model, normalized_runner_name)
+            else:
+                runtime_payload = self._serialize_runtime(model)
+            return self._wrap_status_payload(runtime_payload, runner_name=normalized_runner_name)
 
     def get_run_detail(self, run_id: int) -> dict[str, Any] | None:
         with self.Session() as session:
             model = session.get(TradeTaskRunModel, run_id)
             return self._serialize_run(model) if model is not None else None
 
-    def list_logs(self, limit: int = DEFAULT_LOG_LIMIT, run_id: int | None = None) -> list[dict[str, Any]]:
+    def list_logs(
+        self,
+        current_user: dict[str, Any] | None = None,
+        limit: int = DEFAULT_LOG_LIMIT,
+        *,
+        runner_name: str | None = None,
+        run_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         normalized_limit = max(1, min(int(limit or DEFAULT_LOG_LIMIT), 100))
+        normalized_runner_name = str(runner_name or '').strip() or None
         with self.Session() as session:
             query = session.query(TradeTaskLogModel)
+            if current_user is not None:
+                query = apply_owner_scope(query, TradeTaskLogModel, current_user)
             if run_id is not None:
                 query = query.filter(TradeTaskLogModel.run_id == run_id)
-            else:
-                query = query.filter(TradeTaskLogModel.runner_name == DEFAULT_RUNNER_NAME)
+            elif normalized_runner_name is not None:
+                query = query.filter(TradeTaskLogModel.runner_name == normalized_runner_name)
             models = query.order_by(TradeTaskLogModel.id.desc()).limit(normalized_limit).all()
             return self._serialize_logs(session, models)
 
     def page_logs(
         self,
+        current_user: dict[str, Any],
         offset: int = 0,
         size: int = 20,
         runner_name: str | None = None,
@@ -257,7 +487,7 @@ class TradeTaskService:
     ) -> tuple[int, list[dict[str, Any]]]:
         normalized_offset = max(0, int(offset or 0))
         normalized_size = max(1, min(int(size or 20), 100))
-        normalized_runner_name = (runner_name or DEFAULT_RUNNER_NAME).strip()
+        normalized_runner_name = str(runner_name or '').strip() or None
         normalized_run_id = int(run_id) if run_id else None
         normalized_event_type = (event_type or '').strip()
         normalized_status = (status or '').strip()
@@ -266,7 +496,9 @@ class TradeTaskService:
         normalized_created_to = (created_to or '').strip()
 
         with self.Session() as session:
-            query = session.query(TradeTaskLogModel).filter(TradeTaskLogModel.runner_name == normalized_runner_name)
+            query = apply_owner_scope(session.query(TradeTaskLogModel), TradeTaskLogModel, current_user)
+            if normalized_runner_name is not None:
+                query = query.filter(TradeTaskLogModel.runner_name == normalized_runner_name)
             if normalized_run_id is not None:
                 query = query.filter(TradeTaskLogModel.run_id == normalized_run_id)
             if normalized_event_type:
@@ -293,26 +525,51 @@ class TradeTaskService:
         # 启动前先固化 run snapshot，再把 runtime 切到 starting，最后才真正起线程；
         # 这样即便后续页面继续修改配置，也不会回溯影响本次已经启动的任务。
         with self._lock:
-            model = self._get_or_create_runtime()
-            if self._is_thread_active():
-                logging.warning('交易任务已在运行，忽略重复启动请求: run_id=%s status=%s', model.run_id, model.status)
-                return self._wrap_status_payload(self._serialize_runtime(model))
+            with self.Session() as session:
+                profile = session.get(TradeTaskProfileModel, trade_task_profile_id)
+                if profile is None:
+                    raise NotFoundError('交易任务配置不存在')
+                ensure_owner_access(current_user, profile.owner_user_id)
+                if not str(profile.runner_name or '').strip() or profile.runner_name == DEFAULT_RUNNER_NAME:
+                    profile.runner_name = self._build_profile_runner_name(profile.id)
+                    session.commit()
+                    session.refresh(profile)
+                runner_name = profile.runner_name
+                active_runtime_query = session.query(TradeTaskRuntimeModel).filter(TradeTaskRuntimeModel.status.in_(tuple(ACTIVE_STATUSES)))
+                active_runtime_models = apply_owner_scope(active_runtime_query, TradeTaskRuntimeModel, current_user).all()
+            for runtime_model in active_runtime_models:
+                if runtime_model.runner_name == runner_name:
+                    continue
+                if not self._is_thread_active(runtime_model.runner_name):
+                    self._mark_stale_runtime(self._clone_model(runtime_model), runtime_model.runner_name)
+                    continue
+                if runtime_model.symbol == profile.symbol:
+                    raise ValidationError(
+                        f'当前暂不支持同一交易对并发运行，请先停止 {profile.symbol} 的现有任务：#{runtime_model.trade_task_profile_id or "-"} {runtime_model.profile_name or runtime_model.runner_name}'
+                    )
+
+            model = self._get_or_create_runtime(runner_name)
+            if self._is_thread_active(runner_name):
+                logging.warning('交易任务已在运行，忽略重复启动请求: runner_name=%s run_id=%s status=%s', runner_name, model.run_id, model.status)
+                return self._wrap_status_payload(self._serialize_runtime(model), runner_name=runner_name)
             if model.status in ACTIVE_STATUSES:
-                logging.warning('检测到活跃状态残留，启动前先标记 stale: run_id=%s status=%s', model.run_id, model.status)
-                self._mark_stale_runtime(model)
-                model = self._get_or_create_runtime()
+                logging.warning('检测到活跃状态残留，启动前先标记 stale: runner_name=%s run_id=%s status=%s', runner_name, model.run_id, model.status)
+                self._mark_stale_runtime(model, runner_name)
+                model = self._get_or_create_runtime(runner_name)
 
             run = self._create_run_snapshot(trade_task_profile_id, current_user)
             now = self._now_iso()
             started_by = run['createdBy']
             logging.info(
-                '开始启动交易任务: run_id=%s profile=%s symbol=%s timeframe=%s strategy_type=%s',
+                '开始启动交易任务: runner_name=%s run_id=%s profile=%s symbol=%s timeframe=%s strategy_type=%s',
+                runner_name,
                 run['id'],
                 run['profileName'],
                 run['symbol'],
                 run['timeframe'],
                 run['strategyType'],
             )
+            model.owner_user_id = run['ownerUserId']
             model.run_id = run['id']
             model.trade_task_profile_id = run['tradeTaskProfileId']
             model.profile_name = run['profileName']
@@ -333,6 +590,8 @@ class TradeTaskService:
             model.updated_at = now
             self._save_runtime(model)
             self._append_log(
+                owner_user_id=model.owner_user_id,
+                runner_name=runner_name,
                 run_id=run['id'],
                 event_type='start_requested',
                 status=model.status,
@@ -345,18 +604,24 @@ class TradeTaskService:
                     'strategyType': run['strategyType'],
                 },
             )
-            self._stop_event = Event()
-            self._thread = Thread(target=self._run_loop, args=(run['id'], started_by), daemon=True)
-            self._thread.start()
-            return self._wrap_status_payload(self._serialize_runtime(model))
+            stop_event = Event()
+            thread = Thread(target=self._run_loop, args=(runner_name, run['id'], started_by), daemon=True)
+            self._stop_events[runner_name] = stop_event
+            self._threads[runner_name] = thread
+            thread.start()
+            return self._wrap_status_payload(self._serialize_runtime(model), runner_name=runner_name)
 
-    def stop(self) -> dict[str, Any]:
+    def stop(self, runner_name: str, current_user: dict[str, Any]) -> dict[str, Any]:
         # stop_requested 只是通知循环在合适的边界退出，真正 stopped 需要等待运行线程收尾完成。
+        normalized_runner_name = str(runner_name or '').strip()
+        if not normalized_runner_name:
+            raise ValidationError('runnerName 不能为空')
         with self._lock:
-            model = self._get_or_create_runtime()
-            if model.status not in ACTIVE_STATUSES or not self._is_thread_active():
+            model = self._get_or_create_runtime(normalized_runner_name)
+            ensure_owner_access(current_user, model.owner_user_id)
+            if model.status not in ACTIVE_STATUSES or not self._is_thread_active(normalized_runner_name):
                 if model.status in ACTIVE_STATUSES:
-                    return self._wrap_status_payload(self._mark_stale_runtime(model))
+                    return self._wrap_status_payload(self._mark_stale_runtime(model, normalized_runner_name), runner_name=normalized_runner_name)
                 if model.status != STATUS_STOPPED:
                     now = self._now_iso()
                     model.status = STATUS_STOPPED
@@ -365,10 +630,10 @@ class TradeTaskService:
                     model.next_run_at = None
                     model.updated_at = now
                     self._save_runtime(model)
-                return self._wrap_status_payload(self._serialize_runtime(model))
+                return self._wrap_status_payload(self._serialize_runtime(model), runner_name=normalized_runner_name)
 
             now = self._now_iso()
-            logging.info('收到停止交易任务请求: run_id=%s status=%s', model.run_id, model.status)
+            logging.info('收到停止交易任务请求: runner_name=%s run_id=%s status=%s', normalized_runner_name, model.run_id, model.status)
             model.status = STATUS_STOP_REQUESTED
             model.stop_requested_at = now
             model.next_run_at = None
@@ -377,6 +642,8 @@ class TradeTaskService:
             if model.run_id:
                 self._update_run_status(model.run_id, status=STATUS_STOP_REQUESTED, stop_requested_at=now)
             self._append_log(
+                owner_user_id=model.owner_user_id,
+                runner_name=normalized_runner_name,
                 run_id=model.run_id,
                 event_type='stop_requested',
                 status=model.status,
@@ -385,8 +652,12 @@ class TradeTaskService:
                     'stopRequestedAt': now,
                 },
             )
-            self._stop_event.set()
-            return self._wrap_status_payload(self._serialize_runtime(model))
+            stop_event = self._stop_events.get(normalized_runner_name)
+            if stop_event is None:
+                stop_event = Event()
+                self._stop_events[normalized_runner_name] = stop_event
+            stop_event.set()
+            return self._wrap_status_payload(self._serialize_runtime(model), runner_name=normalized_runner_name)
 
     def _create_run_snapshot(self, trade_task_profile_id: int, current_user: dict[str, Any]) -> dict[str, Any]:
         # run snapshot 会在启动前固化 profile、策略参数和任务级输入，
@@ -395,11 +666,13 @@ class TradeTaskService:
             profile = session.get(TradeTaskProfileModel, trade_task_profile_id)
             if profile is None:
                 raise NotFoundError('交易任务配置不存在')
+            ensure_owner_access(current_user, profile.owner_user_id)
             if not profile.enabled:
                 raise ValidationError('交易任务配置已停用，不能启动')
             strategy_profile = session.get(StrategyProfileModel, profile.strategy_profile_id)
             if strategy_profile is None:
                 raise NotFoundError('关联策略配置不存在')
+            ensure_owner_access(current_user, strategy_profile.owner_user_id)
             if not strategy_profile.enabled:
                 raise ValidationError('关联策略配置已停用，不能启动')
             definition = get_strategy_definition(strategy_profile.strategy_type)
@@ -408,19 +681,23 @@ class TradeTaskService:
             created_by = str(current_user.get('username') or current_user.get('nickname') or current_user.get('id') or '')
             trade_mode = self._normalize_trade_mode_value(profile.trade_mode, bool(profile.sandbox_trade))
             runtime_defaults_snapshot = self.system_service.get_runtime_default_snapshots()
+            exchange_snapshot = self.user_exchange_service.build_runtime_exchange_config(int(profile.owner_user_id or 0))
             fusion_config_snapshot = None
             kline_node_snapshots: list[dict[str, Any]] = []
             signal_source_snapshots: list[dict[str, Any]] = []
             if strategy_profile.strategy_type == 'spot_multi_signal_fusion':
                 fusion_config_snapshot = normalize_fusion_strategy_profile_config(normalized_params)
-                kline_node_snapshots = self._build_kline_node_snapshots(session, fusion_config_snapshot)
+                kline_node_snapshots = self._build_kline_node_snapshots(session, fusion_config_snapshot, int(profile.owner_user_id or 0))
                 signal_source_snapshots = self._build_signal_source_snapshots(
                     session,
                     fusion_config_snapshot,
                     runtime_defaults_snapshot,
                     profile.timeframe,
+                    int(profile.owner_user_id or 0),
                 )
             snapshot = {
+                'ownerUserId': profile.owner_user_id,
+                'exchangeSnapshot': exchange_snapshot,
                 'profileId': profile.id,
                 'profileName': profile.name,
                 'runnerName': profile.runner_name,
@@ -470,6 +747,7 @@ class TradeTaskService:
                 },
             }
             run = TradeTaskRunModel(
+                owner_user_id=profile.owner_user_id,
                 runner_name=profile.runner_name,
                 trade_task_profile_id=profile.id,
                 profile_name=profile.name,
@@ -508,7 +786,7 @@ class TradeTaskService:
             )
             return self._serialize_run(run)
 
-    def _run_loop(self, run_id: int, started_by: str) -> None:
+    def _run_loop(self, runner_name: str, run_id: int, started_by: str) -> None:
         bot = None
         try:
             # 先把系统级生效配置与任务快照拼成当前运行时配置，再创建真实 bot 实例。
@@ -518,13 +796,15 @@ class TradeTaskService:
                 execution_context={
                     'run_id': run_id,
                     'trade_task_profile_id': run_payload['tradeTaskProfileId'],
+                    'owner_user_id': run_payload['ownerUserId'],
                 },
             )
             now = self._now_iso()
             timeframe_minutes = self._timeframe_to_minutes(run_payload['timeframe'])
-            logging.info('交易任务运行线程已启动: run_id=%s timeframe_minutes=%s', run_id, timeframe_minutes)
+            logging.info('交易任务运行线程已启动: runner_name=%s run_id=%s timeframe_minutes=%s', runner_name, run_id, timeframe_minutes)
             with self._lock:
-                model = self._get_or_create_runtime()
+                model = self._get_or_create_runtime(runner_name)
+                model.owner_user_id = run_payload['ownerUserId']
                 model.run_id = run_id
                 model.trade_task_profile_id = run_payload['tradeTaskProfileId']
                 model.profile_name = run_payload['profileName']
@@ -546,6 +826,7 @@ class TradeTaskService:
                 self._save_runtime(model)
                 self._update_run_status(run_id, status=STATUS_RUNNING, started_at=now, error_message='')
                 self._append_log(
+                    runner_name=runner_name,
                     run_id=run_id,
                     event_type='started',
                     status=model.status,
@@ -559,11 +840,16 @@ class TradeTaskService:
                     },
                 )
 
-            while not self._stop_event.is_set():
+            stop_event = self._stop_events.get(runner_name)
+            if stop_event is None:
+                stop_event = Event()
+                self._stop_events[runner_name] = stop_event
+
+            while not stop_event.is_set():
                 # 每轮开始前先刷新 heartbeat 和周期开始时间，便于页面和日志观察当前活跃度。
                 cycle_started_at = self._now_iso()
                 with self._lock:
-                    model = self._get_or_create_runtime()
+                    model = self._get_or_create_runtime(runner_name)
                     model.status = STATUS_RUNNING
                     model.last_heartbeat_at = cycle_started_at
                     model.last_cycle_started_at = cycle_started_at
@@ -571,6 +857,7 @@ class TradeTaskService:
                     model.updated_at = cycle_started_at
                     self._save_runtime(model)
                     self._append_log(
+                        runner_name=runner_name,
                         run_id=run_id,
                         event_type='cycle_started',
                         status=model.status,
@@ -589,7 +876,7 @@ class TradeTaskService:
                 cycle_finished_at = self._now_iso()
                 interval_seconds = bot.trading_bot.get_cycle_interval_seconds()
                 with self._lock:
-                    model = self._get_or_create_runtime()
+                    model = self._get_or_create_runtime(runner_name)
                     if model.status != STATUS_STOP_REQUESTED:
                         model.status = STATUS_RUNNING
                     model.last_heartbeat_at = cycle_finished_at
@@ -598,6 +885,7 @@ class TradeTaskService:
                     model.updated_at = cycle_finished_at
                     self._save_runtime(model)
                     self._append_log(
+                        runner_name=runner_name,
                         run_id=run_id,
                         event_type='cycle_finished',
                         status=model.status,
@@ -608,13 +896,13 @@ class TradeTaskService:
                         },
                     )
 
-                if self._stop_event.wait(interval_seconds):
+                if stop_event.wait(interval_seconds):
                     break
 
             stopped_at = self._now_iso()
-            logging.info('交易任务运行线程准备结束: run_id=%s', run_id)
+            logging.info('交易任务运行线程准备结束: runner_name=%s run_id=%s', runner_name, run_id)
             with self._lock:
-                model = self._get_or_create_runtime()
+                model = self._get_or_create_runtime(runner_name)
                 model.status = STATUS_STOPPED
                 model.stopped_at = stopped_at
                 model.next_run_at = None
@@ -623,6 +911,7 @@ class TradeTaskService:
                 self._save_runtime(model)
                 self._update_run_status(run_id, status=STATUS_STOPPED, finished_at=stopped_at)
                 self._append_log(
+                    runner_name=runner_name,
                     run_id=run_id,
                     event_type='stopped',
                     status=model.status,
@@ -632,23 +921,23 @@ class TradeTaskService:
                     },
                 )
         except TradingHaltError as exc:
-            logging.warning('交易任务触发风控停机: run_id=%s reason=%s detail=%s', run_id, exc.reason, exc.detail)
-            self._mark_risk_halted(run_id, exc)
+            logging.warning('交易任务触发风控停机: runner_name=%s run_id=%s reason=%s detail=%s', runner_name, run_id, exc.reason, exc.detail)
+            self._mark_risk_halted(runner_name, run_id, exc)
         except ConfigValidationError as exc:
-            logging.error('交易任务运行配置校验失败: run_id=%s error=%s', run_id, exc)
-            self._mark_failed(STATUS_CONFIG_ERROR, str(exc), run_id)
+            logging.error('交易任务运行配置校验失败: runner_name=%s run_id=%s error=%s', runner_name, run_id, exc)
+            self._mark_failed(runner_name, STATUS_CONFIG_ERROR, str(exc), run_id)
         except Exception as exc:
-            logging.exception('交易任务运行失败: %s', exc)
-            self._mark_failed(STATUS_FAILED, str(exc), run_id)
+            logging.exception('交易任务运行失败: runner_name=%s run_id=%s error=%s', runner_name, run_id, exc)
+            self._mark_failed(runner_name, STATUS_FAILED, str(exc), run_id)
         finally:
             if bot is not None:
                 bot.close()
             with self._lock:
-                self._thread = None
-                self._stop_event = Event()
+                self._threads.pop(runner_name, None)
+                self._stop_events.pop(runner_name, None)
 
     def _build_runtime_config(self, run_id: int) -> tuple[Config, dict[str, Any]]:
-        # 运行中的 bot 使用的是“系统级生效配置 + 本次 run snapshot”的组合结果；
+        # 运行中的交易任务使用的是“系统级生效配置 + 本次 run snapshot”的组合结果；
         # 因此系统设置会影响未来新任务，但不会改写已经启动任务的任务级参数。
         with self.Session() as session:
             run = session.get(TradeTaskRunModel, run_id)
@@ -658,6 +947,13 @@ class TradeTaskService:
         snapshot = dict(run_payload.get('snapshot') or {})
         config_data = self.system_service.build_effective_config_dict()
         app_cfg = dict(config_data.get('app') or {})
+        exchange_snapshot = dict(snapshot.get('exchangeSnapshot') or {})
+        app_cfg['exchange'] = {
+            'type': exchange_snapshot.get('type', ''),
+            'api_key': exchange_snapshot.get('api_key', ''),
+            'api_secret': exchange_snapshot.get('api_secret', ''),
+            'password': exchange_snapshot.get('password', ''),
+        }
         trade_cfg = dict(app_cfg.get('trade') or {})
         strategy_cfg = dict(trade_cfg.get('strategy') or {})
         strategy_params = run_payload['strategyParams']
@@ -705,9 +1001,9 @@ class TradeTaskService:
             list(strategy_params.keys()),
             trade_cfg['market_feeds']['trade_flow']['enabled'],
         )
-        return Config.from_dict(config_data), run_payload
+        return Config.from_dict(config_data, mode='task_runtime'), run_payload
 
-    def _build_kline_node_snapshots(self, session, fusion_config: dict[str, Any]) -> list[dict[str, Any]]:
+    def _build_kline_node_snapshots(self, session, fusion_config: dict[str, Any], owner_user_id: int) -> list[dict[str, Any]]:
         snapshots: list[dict[str, Any]] = []
         for item in list(fusion_config.get('klineNodes') or []):
             if not bool(item.get('enabled', True)):
@@ -731,6 +1027,8 @@ class TradeTaskService:
             profile = session.get(StrategyProfileModel, int(strategy_profile_id))
             if profile is None:
                 raise NotFoundError(f'融合策略引用的 K 线策略配置不存在: {strategy_profile_id}')
+            if int(profile.owner_user_id or 0) != owner_user_id:
+                raise ValidationError(f'融合策略 K 线节点只能引用所属用户自己的策略配置: {profile.name}')
             if not profile.enabled:
                 raise ValidationError(f'融合策略引用的 K 线策略配置已停用: {profile.name}')
             definition = get_strategy_definition(profile.strategy_type)
@@ -757,6 +1055,7 @@ class TradeTaskService:
         fusion_config: dict[str, Any],
         runtime_defaults: dict[str, Any],
         trade_task_timeframe: str,
+        owner_user_id: int,
     ) -> list[dict[str, Any]]:
         snapshots: list[dict[str, Any]] = []
         indicator_source_count = 0
@@ -769,6 +1068,8 @@ class TradeTaskService:
             profile = session.get(SignalSourceProfileModel, int(source_profile_id))
             if profile is None:
                 raise NotFoundError(f'融合策略引用的信号源配置不存在: {source_profile_id}')
+            if int(profile.owner_user_id or 0) != owner_user_id:
+                raise ValidationError(f'融合策略信号源节点只能引用所属用户自己的信号源配置: {profile.name}')
             if not profile.enabled:
                 raise ValidationError(f'融合策略引用的信号源配置已停用: {profile.name}')
             params = json.loads(profile.params_json or '{}')
@@ -806,9 +1107,52 @@ class TradeTaskService:
             })
         return snapshots
 
-    def _wrap_status_payload(self, runtime: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _build_runtime_placeholder(
+        runner_name: str,
+        profile: TradeTaskProfileModel | None = None,
+    ) -> TradeTaskRuntimeModel:
+        return TradeTaskRuntimeModel(
+            runner_name=runner_name,
+            owner_user_id=profile.owner_user_id if profile is not None else None,
+            run_id=None,
+            trade_task_profile_id=profile.id if profile is not None else None,
+            profile_name=profile.name if profile is not None else None,
+            status=STATUS_STOPPED,
+            started_at=None,
+            stopped_at=None,
+            stop_requested_at=None,
+            last_heartbeat_at=None,
+            last_cycle_started_at=None,
+            last_cycle_finished_at=None,
+            next_run_at=None,
+            last_error='',
+            started_by=None,
+            symbol=profile.symbol if profile is not None else None,
+            timeframe=profile.timeframe if profile is not None else None,
+            timeframe_minutes=TradeTaskService._timeframe_to_minutes(profile.timeframe) if profile is not None else None,
+            strategy_type=profile.strategy_type if profile is not None else None,
+            updated_at=None,
+        )
+
+    @staticmethod
+    def _should_hide_orphan_runtime(model: TradeTaskRuntimeModel) -> bool:
+        return (
+            model.trade_task_profile_id is None
+            and model.run_id is None
+            and model.status == STATUS_STOPPED
+            and not (model.profile_name or '').strip()
+            and not (model.symbol or '').strip()
+            and not (model.strategy_type or '').strip()
+        )
+
+    def _wrap_status_payload(self, runtime: dict[str, Any], *, runner_name: str | None = None) -> dict[str, Any]:
         payload = dict(runtime)
-        payload['recentLogs'] = self.list_logs(limit=DEFAULT_LOG_LIMIT, run_id=payload.get('runId'))
+        payload['recentLogs'] = self.list_logs(
+            limit=DEFAULT_LOG_LIMIT,
+            runner_name=runner_name or payload.get('runnerName'),
+            run_id=payload.get('runId'),
+        )
         payload['currentRun'] = self.get_run_detail(payload['runId']) if payload.get('runId') else None
         return payload
 
@@ -838,11 +1182,11 @@ class TradeTaskService:
                 model.error_message = error_message
             session.commit()
 
-    def _mark_failed(self, status: str, error_message: str, run_id: int | None) -> None:
+    def _mark_failed(self, runner_name: str, status: str, error_message: str, run_id: int | None) -> None:
         now = self._now_iso()
         with self._lock:
-            logging.error('标记交易任务失败: run_id=%s status=%s error=%s', run_id, status, error_message)
-            model = self._get_or_create_runtime()
+            logging.error('标记交易任务失败: runner_name=%s run_id=%s status=%s error=%s', runner_name, run_id, status, error_message)
+            model = self._get_or_create_runtime(runner_name)
             model.status = status
             model.stopped_at = now
             model.next_run_at = None
@@ -853,6 +1197,8 @@ class TradeTaskService:
             if run_id:
                 self._update_run_status(run_id, status=status, finished_at=now, error_message=error_message)
             self._append_log(
+                owner_user_id=model.owner_user_id,
+                runner_name=runner_name,
                 run_id=run_id,
                 event_type='failed',
                 status=model.status,
@@ -863,13 +1209,13 @@ class TradeTaskService:
                 },
             )
 
-    def _mark_risk_halted(self, run_id: int | None, exc: TradingHaltError) -> None:
+    def _mark_risk_halted(self, runner_name: str, run_id: int | None, exc: TradingHaltError) -> None:
         now = self._now_iso()
         detail = dict(exc.detail or {})
         detail.setdefault('reason', exc.reason)
         detail.setdefault('stoppedAt', now)
         with self._lock:
-            model = self._get_or_create_runtime()
+            model = self._get_or_create_runtime(runner_name)
             model.status = STATUS_STOPPED
             model.stopped_at = now
             model.next_run_at = None
@@ -880,6 +1226,8 @@ class TradeTaskService:
             if run_id:
                 self._update_run_status(run_id, status=STATUS_STOPPED, finished_at=now, error_message='')
             self._append_log(
+                owner_user_id=model.owner_user_id,
+                runner_name=runner_name,
                 run_id=run_id,
                 event_type='risk_halt_triggered',
                 status=model.status,
@@ -889,14 +1237,16 @@ class TradeTaskService:
 
     def _mark_stale_if_needed(self) -> None:
         with self._lock:
-            model = self._get_or_create_runtime()
-            if model.status in ACTIVE_STATUSES and not self._is_thread_active():
-                self._mark_stale_runtime(model)
+            with self.Session() as session:
+                models = session.query(TradeTaskRuntimeModel).filter(TradeTaskRuntimeModel.status.in_(tuple(ACTIVE_STATUSES))).all()
+            for model in models:
+                if not self._is_thread_active(model.runner_name):
+                    self._mark_stale_runtime(self._clone_model(model), model.runner_name)
 
-    def _mark_stale_runtime(self, model: TradeTaskRuntimeModel) -> dict[str, Any]:
+    def _mark_stale_runtime(self, model: TradeTaskRuntimeModel, runner_name: str) -> dict[str, Any]:
         # stale 表示数据库里还残留活跃状态，但当前 Web 进程内已没有对应运行线程。
         now = self._now_iso()
-        logging.warning('标记交易任务为 stale: run_id=%s previous_status=%s', model.run_id, model.status)
+        logging.warning('标记交易任务为 stale: runner_name=%s run_id=%s previous_status=%s', runner_name, model.run_id, model.status)
         model.status = STATUS_STALE
         model.stopped_at = now
         model.next_run_at = None
@@ -906,6 +1256,8 @@ class TradeTaskService:
         if model.run_id:
             self._update_run_status(model.run_id, status=STATUS_STALE, finished_at=now, error_message=model.last_error)
         self._append_log(
+            owner_user_id=model.owner_user_id,
+            runner_name=runner_name,
             run_id=model.run_id,
             event_type='stale',
             status=model.status,
@@ -917,16 +1269,18 @@ class TradeTaskService:
         )
         return self._serialize_runtime(model)
 
-    def _is_thread_active(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+    def _is_thread_active(self, runner_name: str) -> bool:
+        thread = self._threads.get(runner_name)
+        return thread is not None and thread.is_alive()
 
-    def _get_or_create_runtime(self) -> TradeTaskRuntimeModel:
+    def _get_or_create_runtime(self, runner_name: str) -> TradeTaskRuntimeModel:
         with self.Session() as session:
-            model = session.get(TradeTaskRuntimeModel, DEFAULT_RUNNER_NAME)
+            model = session.get(TradeTaskRuntimeModel, runner_name)
             if model is None:
                 now = self._now_iso()
                 model = TradeTaskRuntimeModel(
-                    runner_name=DEFAULT_RUNNER_NAME,
+                    runner_name=runner_name,
+                    owner_user_id=None,
                     run_id=None,
                     trade_task_profile_id=None,
                     profile_name=None,
@@ -955,8 +1309,9 @@ class TradeTaskService:
         with self.Session() as session:
             model = session.get(TradeTaskRuntimeModel, runtime.runner_name)
             if model is None:
-                model = TradeTaskRuntimeModel(runner_name=runtime.runner_name, status=runtime.status, updated_at=runtime.updated_at)
+                model = TradeTaskRuntimeModel(runner_name=runtime.runner_name, status=runtime.status, updated_at=runtime.updated_at or self._now_iso())
                 session.add(model)
+            model.owner_user_id = runtime.owner_user_id
             model.run_id = runtime.run_id
             model.trade_task_profile_id = runtime.trade_task_profile_id
             model.profile_name = runtime.profile_name
@@ -974,13 +1329,14 @@ class TradeTaskService:
             model.timeframe = runtime.timeframe
             model.timeframe_minutes = runtime.timeframe_minutes
             model.strategy_type = runtime.strategy_type
-            model.updated_at = runtime.updated_at
+            model.updated_at = runtime.updated_at or self._now_iso()
             session.commit()
 
     @staticmethod
     def _clone_model(model: TradeTaskRuntimeModel) -> TradeTaskRuntimeModel:
         return TradeTaskRuntimeModel(
             runner_name=model.runner_name,
+            owner_user_id=model.owner_user_id,
             run_id=model.run_id,
             trade_task_profile_id=model.trade_task_profile_id,
             profile_name=model.profile_name,
@@ -1002,16 +1358,17 @@ class TradeTaskService:
         )
 
     def _serialize_runtime(self, model: TradeTaskRuntimeModel) -> dict[str, Any]:
-        is_running = model.status in ACTIVE_STATUSES and self._is_thread_active()
+        is_running = model.status in ACTIVE_STATUSES and self._is_thread_active(model.runner_name)
         return {
             'runnerName': model.runner_name,
+            'ownerUserId': model.owner_user_id,
             'runId': model.run_id,
             'tradeTaskProfileId': model.trade_task_profile_id,
             'profileName': model.profile_name or '',
             'status': model.status,
             'isRunning': is_running,
-            'canStart': model.status not in ACTIVE_STATUSES or not self._is_thread_active(),
-            'canStop': model.status in ACTIVE_STATUSES and self._is_thread_active(),
+            'canStart': model.trade_task_profile_id is not None and (model.status not in ACTIVE_STATUSES or not self._is_thread_active(model.runner_name)),
+            'canStop': model.status in ACTIVE_STATUSES and self._is_thread_active(model.runner_name),
             'startedAt': model.started_at,
             'stoppedAt': model.stopped_at,
             'stopRequestedAt': model.stop_requested_at,
@@ -1036,6 +1393,7 @@ class TradeTaskService:
         trade_mode = self._normalize_trade_mode_value(model.trade_mode, bool(model.sandbox_trade))
         return {
             'id': model.id,
+            'ownerUserId': model.owner_user_id,
             'name': model.name,
             'description': model.description or '',
             'enabled': bool(model.enabled),
@@ -1061,6 +1419,7 @@ class TradeTaskService:
         trade_mode = TradeTaskService._normalize_trade_mode_value(model.trade_mode, bool(model.sandbox_trade))
         return {
             'id': model.id,
+            'ownerUserId': model.owner_user_id,
             'runnerName': model.runner_name,
             'tradeTaskProfileId': model.trade_task_profile_id,
             'profileName': model.profile_name,
@@ -1087,13 +1446,24 @@ class TradeTaskService:
             'errorMessage': model.error_message or '',
         }
 
-    def _append_log(self, run_id: int | None, event_type: str, status: str, message: str, detail: dict[str, Any] | None = None) -> None:
+    def _append_log(
+        self,
+        *,
+        owner_user_id: int | None,
+        runner_name: str,
+        run_id: int | None,
+        event_type: str,
+        status: str,
+        message: str,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
         now = self._now_iso()
         with self.Session() as session:
             session.add(
                 TradeTaskLogModel(
+                    owner_user_id=owner_user_id,
                     run_id=run_id,
-                    runner_name=DEFAULT_RUNNER_NAME,
+                    runner_name=runner_name,
                     event_type=event_type,
                     status=status,
                     message=message,
@@ -1115,6 +1485,7 @@ class TradeTaskService:
     def _serialize_log(model: TradeTaskLogModel, run: TradeTaskRunModel | None = None) -> dict[str, Any]:
         return {
             'id': model.id,
+            'ownerUserId': model.owner_user_id,
             'runId': model.run_id,
             'profileName': run.profile_name if run is not None else '',
             'runnerName': model.runner_name,
@@ -1131,6 +1502,7 @@ class TradeTaskService:
         if 'trade_task_runtime' in inspector.get_table_names():
             columns = {column['name'] for column in inspector.get_columns('trade_task_runtime')}
             column_definitions = {
+                'owner_user_id': 'INTEGER',
                 'run_id': 'INTEGER',
                 'trade_task_profile_id': 'INTEGER',
                 'profile_name': 'VARCHAR',
@@ -1159,6 +1531,7 @@ class TradeTaskService:
         if 'trade_task_logs' in inspector.get_table_names():
             columns = {column['name'] for column in inspector.get_columns('trade_task_logs')}
             column_definitions = {
+                'owner_user_id': 'INTEGER',
                 'run_id': 'INTEGER',
                 'detail_json': 'TEXT',
             }
@@ -1172,6 +1545,7 @@ class TradeTaskService:
         if 'trade_task_profiles' in inspector.get_table_names():
             columns = {column['name'] for column in inspector.get_columns('trade_task_profiles')}
             column_definitions = {
+                'owner_user_id': 'INTEGER',
                 'trade_mode': "VARCHAR DEFAULT 'sandbox'",
                 'fee_rate': 'FLOAT DEFAULT 0',
                 'slippage_rate': 'FLOAT DEFAULT 0',
@@ -1188,6 +1562,7 @@ class TradeTaskService:
         if 'trade_task_runs' in inspector.get_table_names():
             columns = {column['name'] for column in inspector.get_columns('trade_task_runs')}
             column_definitions = {
+                'owner_user_id': 'INTEGER',
                 'trade_mode': "VARCHAR DEFAULT 'sandbox'",
                 'fee_rate': 'FLOAT DEFAULT 0',
                 'slippage_rate': 'FLOAT DEFAULT 0',
@@ -1200,6 +1575,31 @@ class TradeTaskService:
                 with self.engine.begin() as connection:
                     for name, ddl in missing_columns.items():
                         connection.execute(text(f'ALTER TABLE trade_task_runs ADD COLUMN {name} {ddl}'))
+
+        fallback_owner_user_id = get_primary_admin_user_id(self.database_url)
+        with self.engine.begin() as connection:
+            connection.execute(
+                text('UPDATE trade_task_profiles SET owner_user_id = :owner_user_id WHERE owner_user_id IS NULL'),
+                {'owner_user_id': fallback_owner_user_id},
+            )
+            connection.execute(
+                text(
+                    'UPDATE trade_task_runs SET owner_user_id = COALESCE(owner_user_id, (SELECT owner_user_id FROM trade_task_profiles WHERE trade_task_profiles.id = trade_task_runs.trade_task_profile_id), :owner_user_id) WHERE owner_user_id IS NULL'
+                ),
+                {'owner_user_id': fallback_owner_user_id},
+            )
+            connection.execute(
+                text(
+                    'UPDATE trade_task_runtime SET owner_user_id = COALESCE(owner_user_id, (SELECT owner_user_id FROM trade_task_profiles WHERE trade_task_profiles.id = trade_task_runtime.trade_task_profile_id), (SELECT owner_user_id FROM trade_task_runs WHERE trade_task_runs.id = trade_task_runtime.run_id), :owner_user_id) WHERE owner_user_id IS NULL'
+                ),
+                {'owner_user_id': fallback_owner_user_id},
+            )
+            connection.execute(
+                text(
+                    'UPDATE trade_task_logs SET owner_user_id = COALESCE(owner_user_id, (SELECT owner_user_id FROM trade_task_runs WHERE trade_task_runs.id = trade_task_logs.run_id), (SELECT owner_user_id FROM trade_task_runtime WHERE trade_task_runtime.runner_name = trade_task_logs.runner_name), :owner_user_id) WHERE owner_user_id IS NULL'
+                ),
+                {'owner_user_id': fallback_owner_user_id},
+            )
 
     def _normalize_indicator_source_params(
         self,

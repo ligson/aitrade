@@ -6,7 +6,11 @@
         show-icon
         message="这里展示的是交易结果日志，可按条件筛选具体成交、跳过、风控拒绝和失败记录。"
         :description="activeRunTip"
-      />
+      >
+        <template #action>
+          <a-button v-if="canGoBackToTaskCenter" size="small" @click="goToTaskCenter">返回任务中心</a-button>
+        </template>
+      </a-alert>
 
       <a-form layout="vertical" class="filter-form">
         <div class="filter-grid">
@@ -59,6 +63,9 @@
           <template v-if="column.key === 'created_at'">
             {{ formatDateTime(text) }}
           </template>
+          <template v-else-if="column.key === 'owner_user_id'">
+            {{ formatOwnerUserId(record.owner_user_id) }}
+          </template>
           <template v-else-if="column.key === 'side'">
             <a-tag :color="sideTagColor(record.side)">{{ sideLabel(record.side) }}</a-tag>
           </template>
@@ -106,6 +113,7 @@
         <a-space direction="vertical" size="middle" style="width: 100%">
           <a-descriptions :column="2" bordered size="small">
             <a-descriptions-item label="日志 ID">{{ detailRecord.id }}</a-descriptions-item>
+            <a-descriptions-item v-if="auth.isAdmin" label="所属用户">{{ formatOwnerUserId(detailRecord.owner_user_id) }}</a-descriptions-item>
             <a-descriptions-item label="运行实例 ID">{{ detailRecord.run_id ?? '-' }}</a-descriptions-item>
             <a-descriptions-item label="任务配置 ID">{{ detailRecord.trade_task_profile_id ?? '-' }}</a-descriptions-item>
             <a-descriptions-item label="交易对">{{ formatSymbol(detailRecord.symbol) }}</a-descriptions-item>
@@ -211,9 +219,12 @@
     </a-drawer>
 
     <a-drawer v-model:open="drawerOpen" title="当前持仓" width="900">
-      <a-table :data-source="positions" :columns="positionColumns" row-key="symbol" :pagination="false" :scroll="{ x: 'max-content' }">
-        <template #bodyCell="{ column, text }">
-          <template v-if="column.key === 'updated_at' || column.key === 'entry_time'">
+      <a-table :data-source="positions" :columns="positionColumns" :row-key="positionRowKey" :pagination="false" :scroll="{ x: 'max-content' }">
+        <template #bodyCell="{ column, record, text }">
+          <template v-if="column.key === 'owner_user_id'">
+            {{ formatOwnerUserId(record.owner_user_id) }}
+          </template>
+          <template v-else-if="column.key === 'updated_at' || column.key === 'entry_time'">
             {{ formatDateTime(text) }}
           </template>
           <template
@@ -246,11 +257,11 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import dayjs, { type Dayjs } from 'dayjs'
 import 'dayjs/locale/zh-cn'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { fetchStrategyDefinitions } from '@/api/strategies'
-import { fetchSystemSettings } from '@/api/system'
-import { fetchPositions, pageTradeLogs } from '@/api/tradeLogs'
+import { useAuthStore } from '@/stores/auth'
+import { fetchPositions, fetchTradeLogFilterOptions, pageTradeLogs } from '@/api/tradeLogs'
 import type { StrategyDefinition } from '@/types/strategy'
 import type { PositionItem, TradeLogItem } from '@/types/tradeLog'
 import type { TradeMode } from '@/types/system'
@@ -268,6 +279,8 @@ type SignalNodeItem = {
 }
 
 const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 const loading = ref(false)
 const drawerOpen = ref(false)
 const detailOpen = ref(false)
@@ -302,6 +315,7 @@ const filters = reactive<{ strategy?: string; side?: string; result?: string; sy
 })
 
 const strategyOptions = computed(() => definitions.value.map((item) => ({ label: item.displayName, value: item.strategyType })))
+const canGoBackToTaskCenter = computed(() => Boolean(firstQueryValue(route.query.runnerName) || firstQueryValue(route.query.profileId)))
 const activeRunTip = computed(() => {
   if (!filters.runId) {
     return '可结合策略、结果、交易对、运行实例和时间范围排查一次任务运行中的具体交易结果。'
@@ -352,39 +366,47 @@ const detailSignalSummaryVisible = computed(() => {
     || detailSignalSummary.value.activeSellNodes !== '-'
 })
 
-const columns = [
-  { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 200 },
-  { title: '运行实例 ID', dataIndex: 'run_id', key: 'run_id', width: 120 },
-  { title: '策略', dataIndex: 'strategy', key: 'strategy', width: 140 },
-  { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
-  { title: '交易方式', dataIndex: 'trade_mode', key: 'trade_mode', width: 120 },
-  { title: '方向', dataIndex: 'side', key: 'side', width: 100 },
-  { title: '价格', dataIndex: 'market_price', key: 'market_price', width: 120 },
-  { title: '数量', dataIndex: 'requested_amount', key: 'requested_amount', width: 120 },
-  { title: '成交价', dataIndex: 'estimated_fill_price', key: 'estimated_fill_price', width: 120 },
-  { title: '手续费', dataIndex: 'estimated_fee', key: 'estimated_fee', width: 120 },
-  { title: '净盈亏', dataIndex: 'realized_pnl_net', key: 'realized_pnl_net', width: 140 },
-  { title: '结果', dataIndex: 'result', key: 'result', width: 120 },
-  { title: '触发来源', dataIndex: 'trigger_source', key: 'trigger_source', width: 160 },
-  { title: '订单 ID', dataIndex: 'order_id', key: 'order_id', width: 220 },
-  { title: '原因', dataIndex: 'result_reason', key: 'result_reason', width: 280 },
-  { title: '错误信息', dataIndex: 'error_message', key: 'error_message', width: 300 },
-  { title: '操作', key: 'actions', width: 100, fixed: 'right' },
-]
+const columns = computed(() => {
+  const ownerColumn = auth.isAdmin ? [{ title: '所属用户', dataIndex: 'owner_user_id', key: 'owner_user_id', width: 120 }] : []
+  return [
+    { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 200 },
+    ...ownerColumn,
+    { title: '运行实例 ID', dataIndex: 'run_id', key: 'run_id', width: 120 },
+    { title: '策略', dataIndex: 'strategy', key: 'strategy', width: 140 },
+    { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
+    { title: '交易方式', dataIndex: 'trade_mode', key: 'trade_mode', width: 120 },
+    { title: '方向', dataIndex: 'side', key: 'side', width: 100 },
+    { title: '价格', dataIndex: 'market_price', key: 'market_price', width: 120 },
+    { title: '数量', dataIndex: 'requested_amount', key: 'requested_amount', width: 120 },
+    { title: '成交价', dataIndex: 'estimated_fill_price', key: 'estimated_fill_price', width: 120 },
+    { title: '手续费', dataIndex: 'estimated_fee', key: 'estimated_fee', width: 120 },
+    { title: '净盈亏', dataIndex: 'realized_pnl_net', key: 'realized_pnl_net', width: 140 },
+    { title: '结果', dataIndex: 'result', key: 'result', width: 120 },
+    { title: '触发来源', dataIndex: 'trigger_source', key: 'trigger_source', width: 160 },
+    { title: '订单 ID', dataIndex: 'order_id', key: 'order_id', width: 220 },
+    { title: '原因', dataIndex: 'result_reason', key: 'result_reason', width: 280 },
+    { title: '错误信息', dataIndex: 'error_message', key: 'error_message', width: 300 },
+    { title: '操作', key: 'actions', width: 100, fixed: 'right' },
+  ]
+})
 
-const positionColumns = [
-  { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
-  { title: '策略', dataIndex: 'strategy', key: 'strategy', width: 140 },
-  { title: '入场时间', dataIndex: 'entry_time', key: 'entry_time', width: 180 },
-  { title: '入场价', dataIndex: 'entry_price', key: 'entry_price', width: 120 },
-  { title: '数量', dataIndex: 'amount', key: 'amount', width: 120 },
-  { title: '止损', dataIndex: 'stop_loss', key: 'stop_loss', width: 120 },
-  { title: '初始止损', dataIndex: 'initial_stop_loss', key: 'initial_stop_loss', width: 120 },
-  { title: '追踪止损', dataIndex: 'trailing_stop_price', key: 'trailing_stop_price', width: 120 },
-  { title: '最高价', dataIndex: 'highest_price', key: 'highest_price', width: 120 },
-  { title: '最高收盘价', dataIndex: 'highest_close', key: 'highest_close', width: 140 },
-  { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 180 },
-]
+const positionColumns = computed(() => {
+  const ownerColumn = auth.isAdmin ? [{ title: '所属用户', dataIndex: 'owner_user_id', key: 'owner_user_id', width: 120 }] : []
+  return [
+    ...ownerColumn,
+    { title: '交易对', dataIndex: 'symbol', key: 'symbol', width: 140 },
+    { title: '策略', dataIndex: 'strategy', key: 'strategy', width: 140 },
+    { title: '入场时间', dataIndex: 'entry_time', key: 'entry_time', width: 180 },
+    { title: '入场价', dataIndex: 'entry_price', key: 'entry_price', width: 120 },
+    { title: '数量', dataIndex: 'amount', key: 'amount', width: 120 },
+    { title: '止损', dataIndex: 'stop_loss', key: 'stop_loss', width: 120 },
+    { title: '初始止损', dataIndex: 'initial_stop_loss', key: 'initial_stop_loss', width: 120 },
+    { title: '追踪止损', dataIndex: 'trailing_stop_price', key: 'trailing_stop_price', width: 120 },
+    { title: '最高价', dataIndex: 'highest_price', key: 'highest_price', width: 120 },
+    { title: '最高收盘价', dataIndex: 'highest_close', key: 'highest_close', width: 140 },
+    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 180 },
+  ]
+})
 
 const pagination = reactive({
   current: 1,
@@ -392,6 +414,16 @@ const pagination = reactive({
   total: total.value,
   showSizeChanger: false,
 })
+
+function firstQueryValue(value: unknown) {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'string' ? value[0] : undefined
+  }
+  return undefined
+}
 
 function filterSelectOption(input: string, option?: { children?: unknown; value?: unknown }) {
   const label = typeof option?.children === 'string' ? option.children : String(option?.value || '')
@@ -402,6 +434,14 @@ function syncRunIdFromRoute() {
   const rawRunId = route.query.runId
   const nextRunId = typeof rawRunId === 'string' ? Number(rawRunId) : Number(rawRunId?.[0])
   filters.runId = Number.isInteger(nextRunId) && nextRunId > 0 ? nextRunId : undefined
+}
+
+function buildTaskCenterQuery() {
+  return {
+    ...(firstQueryValue(route.query.runnerName) ? { runnerName: firstQueryValue(route.query.runnerName)! } : {}),
+    ...(firstQueryValue(route.query.profileId) ? { profileId: firstQueryValue(route.query.profileId)! } : {}),
+    tab: firstQueryValue(route.query.tab) || 'runtime',
+  }
 }
 
 function buildPayload() {
@@ -440,6 +480,17 @@ function formatDateTime(value: string | null | undefined) {
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : value
+}
+
+function formatOwnerUserId(value: number | null | undefined) {
+  if (!value) {
+    return '-'
+  }
+  return value === auth.currentUser?.id ? `${value}（我）` : String(value)
+}
+
+function positionRowKey(record: PositionItem) {
+  return `${record.owner_user_id || 0}-${record.symbol}`
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -620,10 +671,14 @@ async function loadLogs() {
   }
 }
 
+function goToTaskCenter() {
+  router.push({ path: '/trade-tasks', query: buildTaskCenterQuery() })
+}
+
 async function loadFilterOptions() {
-  const [strategyDefinitions, settings] = await Promise.all([fetchStrategyDefinitions(), fetchSystemSettings()])
+  const [strategyDefinitions, filterOptions] = await Promise.all([fetchStrategyDefinitions(), fetchTradeLogFilterOptions()])
   definitions.value = strategyDefinitions
-  symbolOptions.value = Array.from(new Set(settings.editable.supportedSymbols.map((item) => item.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  symbolOptions.value = Array.from(new Set(filterOptions.symbols.map((item) => item.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 async function loadPositions() {

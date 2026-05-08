@@ -5,11 +5,25 @@
         type="info"
         show-icon
         message="这里展示的是交易任务运行过程事件日志，不是交易结果日志。"
-        description="可按事件、状态、关键词和时间范围筛选；长详情会在表格内换行，并可在详情抽屉里查看完整信息。"
-      />
+        :description="activeContextTip"
+      >
+        <template #action>
+          <a-button v-if="canGoBackToTaskCenter" size="small" @click="goToTaskCenter">返回任务中心</a-button>
+        </template>
+      </a-alert>
 
       <a-form layout="vertical" class="filter-form">
         <div class="filter-grid">
+          <a-form-item label="任务配置 / Runner" class="filter-item">
+            <a-select v-model:value="filters.runnerName" allow-clear show-search placeholder="全部任务配置" :filter-option="filterSelectOption">
+              <a-select-option v-for="item in profileOptions" :key="item.runnerName" :value="item.runnerName">
+                {{ item.name }} / {{ item.runnerName }}
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="运行实例 ID" class="filter-item">
+            <a-input-number v-model:value="filters.runId" :min="1" :precision="0" placeholder="全部实例" style="width: 100%" />
+          </a-form-item>
           <a-form-item label="事件" class="filter-item">
             <a-select v-model:value="filters.eventType" allow-clear placeholder="全部事件">
               <a-select-option v-for="item in eventTypeOptions" :key="item.value" :value="item.value">
@@ -36,6 +50,7 @@
         <a-space wrap>
           <a-button type="primary" @click="handleSearch">查询</a-button>
           <a-button @click="resetFilters">重置</a-button>
+          <a-button v-if="canGoBackToTaskCenter" @click="goToTaskCenter">返回任务中心</a-button>
         </a-space>
       </a-form>
 
@@ -43,6 +58,9 @@
         <template #bodyCell="{ column, record, text }">
           <template v-if="column.key === 'createdAt'">
             {{ formatDateTime(text) }}
+          </template>
+          <template v-else-if="column.key === 'ownerUserId'">
+            {{ formatOwnerUserId(record.ownerUserId) }}
           </template>
           <template v-else-if="column.key === 'eventType'">
             <a-tag :color="eventTypeColor(record.eventType)">{{ eventTypeLabel(record.eventType) }}</a-tag>
@@ -80,6 +98,7 @@
         <a-space direction="vertical" size="middle" style="width: 100%">
           <a-descriptions :column="2" bordered size="small">
             <a-descriptions-item label="日志 ID">{{ detailRecord.id }}</a-descriptions-item>
+            <a-descriptions-item v-if="auth.isAdmin" label="所属用户">{{ formatOwnerUserId(detailRecord.ownerUserId) }}</a-descriptions-item>
             <a-descriptions-item label="运行实例 ID">{{ detailRecord.runId ?? '-' }}</a-descriptions-item>
             <a-descriptions-item label="配置名称">{{ detailRecord.profileName || '-' }}</a-descriptions-item>
             <a-descriptions-item label="Runner">{{ detailRecord.runnerName }}</a-descriptions-item>
@@ -113,23 +132,36 @@
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import dayjs, { type Dayjs } from 'dayjs'
 import 'dayjs/locale/zh-cn'
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
-import { pageTradeTaskLogs } from '@/api/system'
-import type { TradeTaskLogItem } from '@/types/system'
+import { useAuthStore } from '@/stores/auth'
+import { fetchTradeTaskProfiles, pageTradeTaskLogs } from '@/api/system'
+import type { TradeTaskLogItem, TradeTaskProfile } from '@/types/system'
 
 dayjs.locale('zh-cn')
 
+const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 const loading = ref(false)
 const detailOpen = ref(false)
 const rows = ref<TradeTaskLogItem[]>([])
+const profiles = ref<TradeTaskProfile[]>([])
 const detailRecord = ref<TradeTaskLogItem | null>(null)
 const offset = ref(0)
 const size = ref(10)
 
-const filters = reactive<{ eventType?: string; status?: string; keyword: string; createdRange: [Dayjs, Dayjs] | [] }>({
+const filters = reactive<{
+  runnerName?: string
+  runId?: number
+  eventType?: string
+  status?: string
+  keyword: string
+  createdRange: [Dayjs, Dayjs] | []
+}>({
+  runnerName: undefined,
+  runId: undefined,
   eventType: undefined,
   status: undefined,
   keyword: '',
@@ -164,17 +196,35 @@ const eventTypeOptions = [
   { label: '状态残留', value: 'stale' },
 ]
 
-const columns = [
-  { title: '时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
-  { title: '运行实例 ID', dataIndex: 'runId', key: 'runId', width: 120 },
-  { title: '配置名称', dataIndex: 'profileName', key: 'profileName', width: 200 },
-  { title: '事件', dataIndex: 'eventType', key: 'eventType', width: 120 },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
-  { title: '说明', dataIndex: 'message', key: 'message', width: 240 },
-  { title: '详情摘要', key: 'detailPreview', width: 420 },
-  { title: '操作', key: 'actions', width: 180 },
-]
+const columns = computed(() => {
+  const ownerColumn = auth.isAdmin ? [{ title: '所属用户', dataIndex: 'ownerUserId', key: 'ownerUserId', width: 120 }] : []
+  return [
+    { title: '时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
+    ...ownerColumn,
+    { title: '运行实例 ID', dataIndex: 'runId', key: 'runId', width: 120 },
+    { title: '配置名称', dataIndex: 'profileName', key: 'profileName', width: 200 },
+    { title: '事件', dataIndex: 'eventType', key: 'eventType', width: 120 },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
+    { title: '说明', dataIndex: 'message', key: 'message', width: 240 },
+    { title: '详情摘要', key: 'detailPreview', width: 420 },
+    { title: '操作', key: 'actions', width: 180 },
+  ]
+})
 
+const profileOptions = computed(() => profiles.value.slice().sort((a, b) => a.id - b.id))
+const canGoBackToTaskCenter = computed(() => Boolean(firstQueryValue(route.query.runnerName) || firstQueryValue(route.query.profileId)))
+const activeContextTip = computed(() => {
+  if (filters.runnerName && filters.runId) {
+    return `当前已按 Runner ${filters.runnerName} 和运行实例 ID ${filters.runId} 聚焦查看任务事件。`
+  }
+  if (filters.runnerName) {
+    return `当前已按 Runner ${filters.runnerName} 聚焦查看任务事件；可继续按事件、状态、关键词和时间范围筛选。`
+  }
+  if (filters.runId) {
+    return `当前已按运行实例 ID ${filters.runId} 聚焦查看任务事件。`
+  }
+  return '可按任务、运行实例、事件、状态、关键词和时间范围筛选；长详情会在表格内换行，并可在详情抽屉里查看完整信息。'
+})
 const detailEntries = computed(() => {
   if (!detailRecord.value) {
     return []
@@ -185,11 +235,23 @@ const detailEntries = computed(() => {
   }))
 })
 
+function firstQueryValue(value: unknown) {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'string' ? value[0] : undefined
+  }
+  return undefined
+}
+
 function buildPayload() {
   const [createdFrom, createdTo] = filters.createdRange
   return {
     offset: offset.value,
     size: size.value,
+    runnerName: filters.runnerName,
+    runId: filters.runId,
     eventType: filters.eventType,
     status: filters.status,
     keyword: filters.keyword.trim() || undefined,
@@ -198,12 +260,43 @@ function buildPayload() {
   }
 }
 
+function buildTaskCenterQuery() {
+  const runnerName = filters.runnerName || firstQueryValue(route.query.runnerName)
+  const matchedProfileId = runnerName ? profiles.value.find((item) => item.runnerName === runnerName)?.id : undefined
+  const profileId = firstQueryValue(route.query.profileId) || (matchedProfileId ? String(matchedProfileId) : undefined)
+  return {
+    ...(runnerName ? { runnerName } : {}),
+    ...(profileId ? { profileId } : {}),
+    tab: firstQueryValue(route.query.tab) || 'runtime',
+  }
+}
+
+function syncFiltersFromRoute() {
+  const runnerName = firstQueryValue(route.query.runnerName)
+  const rawRunId = firstQueryValue(route.query.runId)
+  const nextRunId = rawRunId ? Number(rawRunId) : Number.NaN
+  filters.runnerName = runnerName || undefined
+  filters.runId = Number.isInteger(nextRunId) && nextRunId > 0 ? nextRunId : undefined
+}
+
+function filterSelectOption(input: string, option?: { children?: unknown; value?: unknown }) {
+  const label = typeof option?.children === 'string' ? option.children : String(option?.value || '')
+  return label.toLowerCase().includes(input.toLowerCase())
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return '-'
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : value
+}
+
+function formatOwnerUserId(value: number | null | undefined) {
+  if (!value) {
+    return '-'
+  }
+  return value === auth.currentUser?.id ? `${value}（我）` : String(value)
 }
 
 function statusLabel(value: string | null | undefined) {
@@ -256,6 +349,10 @@ function formatDetailPreview(detail: Record<string, unknown>) {
     .join('；')
 }
 
+async function loadProfiles() {
+  profiles.value = await fetchTradeTaskProfiles()
+}
+
 async function loadLogs() {
   loading.value = true
   try {
@@ -273,11 +370,24 @@ function openDetail(record: TradeTaskLogItem) {
   detailOpen.value = true
 }
 
+function goToTaskCenter() {
+  router.push({ path: '/trade-tasks', query: buildTaskCenterQuery() })
+}
+
 function goToTradeLogs(record: TradeTaskLogItem) {
   if (!record.runId) {
     return
   }
-  router.push({ path: '/trade-logs', query: { runId: String(record.runId) } })
+  const matchedProfileId = profiles.value.find((item) => item.runnerName === record.runnerName)?.id
+  router.push({
+    path: '/trade-logs',
+    query: {
+      runId: String(record.runId),
+      runnerName: record.runnerName,
+      ...(matchedProfileId ? { profileId: String(matchedProfileId) } : {}),
+      tab: firstQueryValue(route.query.tab) || 'runtime',
+    },
+  })
 }
 
 function handleSearch() {
@@ -287,6 +397,8 @@ function handleSearch() {
 }
 
 function resetFilters() {
+  filters.runnerName = undefined
+  filters.runId = undefined
   filters.eventType = undefined
   filters.status = undefined
   filters.keyword = ''
@@ -301,7 +413,21 @@ function handleTableChange(page: { current?: number }) {
   loadLogs()
 }
 
-onMounted(loadLogs)
+watch(
+  () => [route.query.runnerName, route.query.runId, route.query.profileId, route.query.tab],
+  () => {
+    syncFiltersFromRoute()
+    offset.value = 0
+    pagination.current = 1
+    loadLogs()
+  },
+)
+
+onMounted(async () => {
+  await loadProfiles()
+  syncFiltersFromRoute()
+  await loadLogs()
+})
 </script>
 
 <style scoped>
@@ -331,7 +457,8 @@ onMounted(loadLogs)
 
 .filter-item :deep(.ant-select),
 .filter-item :deep(.ant-picker),
-.filter-item :deep(.ant-input) {
+.filter-item :deep(.ant-input),
+.filter-item :deep(.ant-input-number) {
   width: 100%;
 }
 

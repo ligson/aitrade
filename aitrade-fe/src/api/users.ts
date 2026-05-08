@@ -17,7 +17,7 @@ export function createUser(payload: {
   return post<UserItem>('/api/users/create', payload)
 }
 
-export function updateUser(payload: { id: number; email: string; nickname: string; remark: string }) {
+export function updateUser(payload: { id: number; email: string; nickname: string; remark: string; isAdmin: boolean }) {
   return post<UserItem>('/api/users/update', payload)
 }
 

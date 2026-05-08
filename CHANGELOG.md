@@ -2,6 +2,20 @@
 
 所有有意义的仓库变更都应记录在这里。
 
+## 2026-05-08
+
+- 继续收口多用户体验：交易所设置页改为只维护当前登录用户自己的凭证，不再提供管理员切换查看其他用户配置；用户维护页同步补齐已有用户的管理员身份编辑入口，管理员是否可查看他人业务数据继续只由“用户维护”里的管理员身份控制。
+- 继续落地多用户隔离：新增普通用户可见的“交易所设置”页，交易中心 / 策略中心 / 回测页补齐管理员态“所属用户”展示，交易日志筛选改为走 owner-aware 后端选项接口，并修复管理员查看多用户持仓时的表格行键冲突。
+- 收口 Web 对 `config.yaml` 交易所凭证的最后兜底：任务运行态现在只读取“交易所设置”页保存的用户凭证并冻结到 run snapshot，用户未配置时会被明确拦截；`config.example.yaml` 与 README / CLAUDE / docs 也同步改为不再要求保留 `app.exchange`。
+- 修复交易任务配置删除只删 profile、不清理关联数据的问题：后端 `TradeTaskService.delete_profile()` 现会在保留前端二次确认提示的前提下，同步清理该任务配置关联的 runtime、run 快照、任务日志、交易日志，以及通过 `source_trade_id` 精确归属的持仓快照，避免任务中心继续出现 orphan runtime 或其他脏数据。
+- 重构“交易中心”的信息架构：左侧菜单收敛为“任务中心 / 任务日志 / 交易日志”，原 `交易任务配置` 与 `交易任务控制` 两个入口并入统一 `任务中心`；任务中心页新增任务概览卡片、统一任务列表、概览/配置/运行三段式详情抽屉，并保留旧 `/trade-task-profiles`、`/trade-task-control` 地址到 `/trade-tasks` 的兼容跳转；同时任务日志与交易日志补齐返回任务中心的上下文深链，帮助页与项目文档也同步改为新的页面命名。
+- 仓库运行模式正式收敛为 Web-only：删除独立 `python -m aitrade` 与后端/仓库根目录的 `start.sh / status.sh / stop.sh` 入口，统一只保留 `python -m aitrade.web_runner` 与 `start-web.sh / status-web.sh / stop-web.sh`。
+- 配置校验语义从旧 `bot/web` 收敛为 `web/task_runtime`：Web 服务启动继续允许最小文件配置，真实交易任务运行前则改为显式使用任务运行态校验，避免页面任务控制继续隐式依赖已删除的 Bot 入口语义。
+- 仓库、后端与运维文档全面改成 Web-only 说明：初始化提示改为 `bash start-web.sh`，示例配置和 README / CLAUDE / docs 统一改为“页面配置任务、页面启动任务、页面查看任务日志”的单一路径。
+- 修复策略脏数据会拖垮多个页面的问题：`/api/strategies/list` 现改为逐条隔离异常策略，返回 `items / invalidItems / summary`，策略配置页可直接看到并删除异常策略，交易任务配置页、交易任务控制页与回测页则会跳过异常项并显示清理提示；同时策略删除新增交易任务配置引用与融合节点引用检查，避免继续制造悬挂引用或新的融合脏数据。
+- 交易任务控制链路升级为多 runner 模型：后端 `TradeTaskService` 改为按任务配置分配独立 `runnerName`、维护多线程运行态与定向停止，控制页升级为多任务表格，任务日志页新增 runner 维度筛选；当前版本允许不同交易对并发运行，但会显式拒绝同一交易对并发启动，避免共用 `position_state` 持仓快照造成冲突；同时控制页会自动隐藏无配置、无运行记录且已停止的旧 `default` 空白残留运行态。
+- 修复 Web 控制脚本对 uv/venv Python 启动进程的识别：`start-web.sh`、`status-web.sh`、`stop-web.sh` 不再依赖 `.venv/bin/python` 的命令行文本匹配，而是按 `-m aitrade.web_runner` 与当前仓库工作目录识别目标进程；当运行态文件缺失但当前仓库 Web 进程仍在监听端口时，状态与停止脚本也会按监听端口自动恢复判断，不再把正常服务误报为 stale 或 stopped。
+
 ## 2026-05-07
 
 - 调整默认数据目录边界：后端默认将 SQLite 交易库、历史数据目录、Freqtrade `user_data` 目录与系统日志目录迁到用户目录 `~/.aitrade/`，避免继续与 `aitrade-be/` 程序运行目录混在一起；其中 PID 等程序控制运行态仍保留在 `aitrade-be/.aitrade/`。

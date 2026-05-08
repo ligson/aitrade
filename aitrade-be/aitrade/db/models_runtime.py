@@ -17,9 +17,11 @@ class TradeTaskProfileModel(Base):
     __table_args__ = (
         Index('idx_trade_task_profiles_runner_enabled', 'runner_name', 'enabled'),
         Index('idx_trade_task_profiles_strategy_profile', 'strategy_profile_id'),
+        Index('idx_trade_task_profiles_owner_created_at', 'owner_user_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(Text, default='')
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -44,9 +46,11 @@ class TradeTaskRunModel(Base):
     __table_args__ = (
         Index('idx_trade_task_runs_runner_status_created_at', 'runner_name', 'status', 'created_at'),
         Index('idx_trade_task_runs_profile_created_at', 'trade_task_profile_id', 'created_at'),
+        Index('idx_trade_task_runs_owner_created_at', 'owner_user_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     runner_name: Mapped[str] = mapped_column(String, nullable=False)
     trade_task_profile_id: Mapped[Optional[int]] = mapped_column(Integer)
     profile_name: Mapped[str] = mapped_column(String, nullable=False)
@@ -77,9 +81,11 @@ class TradeTaskRuntimeModel(Base):
     __tablename__ = 'trade_task_runtime'
     __table_args__ = (
         Index('idx_trade_task_runtime_status_updated_at', 'status', 'updated_at'),
+        Index('idx_trade_task_runtime_owner_updated_at', 'owner_user_id', 'updated_at'),
     )
 
     runner_name: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     run_id: Mapped[Optional[int]] = mapped_column(Integer)
     trade_task_profile_id: Mapped[Optional[int]] = mapped_column(Integer)
     profile_name: Mapped[Optional[str]] = mapped_column(String)

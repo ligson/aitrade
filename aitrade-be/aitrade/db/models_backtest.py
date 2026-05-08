@@ -18,9 +18,11 @@ class BacktestJobModel(Base):
         Index('idx_backtest_jobs_status_created_at', 'status', 'created_at'),
         Index('idx_backtest_jobs_strategy_created_at', 'strategy_type', 'created_at'),
         Index('idx_backtest_jobs_profile_created_at', 'strategy_profile_id', 'created_at'),
+        Index('idx_backtest_jobs_owner_created_at', 'owner_user_id', 'created_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     strategy_type: Mapped[str] = mapped_column(String, nullable=False)
     strategy_profile_id: Mapped[Optional[int]] = mapped_column(Integer)
     profile_name: Mapped[str] = mapped_column(String, nullable=False)

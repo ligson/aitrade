@@ -46,9 +46,20 @@ pid_command() {
     ps -p "$pid" -o command= 2>/dev/null || true
 }
 
+process_cwd() {
+    local pid="$1"
+
+    if [ "$HAS_LSOF" -ne 1 ]; then
+        return 0
+    fi
+
+    lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | grep '^n' | head -n 1 | cut -c2- || true
+}
+
 process_matches() {
     local pid="$1"
     local cmdline
+    local process_root
 
     if ! ps -p "$pid" >/dev/null 2>&1; then
         return 1
@@ -58,8 +69,16 @@ process_matches() {
     if [ -z "$cmdline" ]; then
         return 1
     fi
+    if [[ "$cmdline" != *"-m aitrade.web_runner"* ]]; then
+        return 1
+    fi
 
-    [[ "$cmdline" == *"$VENV_PYTHON"* && "$cmdline" == *"-m aitrade.web_runner"* ]]
+    process_root=$(process_cwd "$pid")
+    if [ -n "$process_root" ] && [ "$process_root" != "$ROOT_DIR" ]; then
+        return 1
+    fi
+
+    return 0
 }
 
 port_listener_pid() {
@@ -278,7 +297,7 @@ if [ -n "$LISTENER_PID" ]; then
     if [ -n "$LISTENER_CMD" ]; then
         printf '占用命令: %s\n' "$LISTENER_CMD" >&2
     fi
-    error "建议：先释放端口 $WEB_PORT，或检查是否仍有旧版本 Web 进程未停止。"
+    error "建议：先释放端口 ${WEB_PORT}，或检查是否仍有旧版本 Web 进程未停止。"
     exit 1
 fi
 

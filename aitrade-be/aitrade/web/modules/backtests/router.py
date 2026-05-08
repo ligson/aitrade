@@ -160,20 +160,20 @@ def run_backtest(
 def stop_backtest(
     payload: BacktestStopRequest,
     config: Config = Depends(get_config),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     service = BacktestService(config)
-    return success_response(service.stop_job(payload.id))
+    return success_response(service.stop_job(payload.id, current_user))
 
 
 @router.post('/page')
 def page_backtests(
     payload: BacktestPageRequest,
     config: Config = Depends(get_config),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     service = BacktestService(config)
-    total, rows = service.page_jobs(payload.offset, payload.size, payload.keyword, payload.status)
+    total, rows = service.page_jobs(current_user, payload.offset, payload.size, payload.keyword, payload.status)
     return page_response(total, payload.size, payload.offset, rows)
 
 
@@ -181,18 +181,18 @@ def page_backtests(
 def backtest_detail(
     payload: BacktestDetailRequest,
     config: Config = Depends(get_config),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     service = BacktestService(config)
-    return success_response(service.get_job_detail(payload.id))
+    return success_response(service.get_job_detail(payload.id, current_user))
 
 
 @router.post('/trades')
 def backtest_trades(
     payload: BacktestTradesPageRequest,
     config: Config = Depends(get_config),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     service = BacktestService(config)
-    total, rows = service.page_job_trades(payload.jobId, payload.offset, payload.size)
+    total, rows = service.page_job_trades(payload.jobId, payload.offset, payload.size, current_user)
     return page_response(total, payload.size, payload.offset, rows)

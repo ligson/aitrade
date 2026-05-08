@@ -11,22 +11,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 如果任务只涉及自动交易、策略、配置、脚本、日志、持久化或打包，默认工作目标是 `aitrade-be/`。
 
+## 当前运行模式
+
+仓库已经收敛为 **Web-only**：
+
+- 唯一后端运行入口是 `python -m aitrade.web_runner`
+- 后台脚本只保留 `aitrade-be/start-web.sh`、`status-web.sh`、`stop-web.sh`
+- 交易任务由管理台页面启动、停止和查看状态
+- 不要再恢复或新增独立 Bot/CLI 直跑入口、`python -m aitrade`、`start.sh / status.sh / stop.sh`
+
 ## 常用命令
 
-仓库根目录保留了兼容入口：
+仓库根目录保留的兼容入口：
 
 ```bash
 bash init-env.sh
-bash start.sh
-bash status.sh
-bash stop.sh
-bash query-trades.sh latest 20
 bash package.sh
+bash query-trades.sh latest 20
+bash deploy.sh chenws-japan
 ```
 
-这些脚本会转发到 `aitrade-be/` 内执行。
-
-如需后端的详细初始化、运行、配置和实现说明，优先查看 `aitrade-be/README.md` 与 `aitrade-be/CLAUDE.md`。
+说明：
+- 这些脚本会转发到 `aitrade-be/` 内执行
+- Web 服务控制脚本位于 `aitrade-be/`，不是仓库根目录
+- 如需后端详细初始化、运行、配置和实现说明，优先查看 `aitrade-be/README.md` 与 `aitrade-be/CLAUDE.md`
 
 ## 目录边界
 

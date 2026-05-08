@@ -54,6 +54,18 @@
           show-icon
           :message="'以下策略暂不支持离线回测：' + unsupportedProfiles.map((item) => item.name).join('、')"
         />
+        <a-alert
+          v-if="invalidStrategyProfileCount > 0"
+          style="margin-top: 12px"
+          type="warning"
+          show-icon
+          :message="`检测到 ${invalidStrategyProfileCount} 条异常策略配置，已自动跳过，不影响当前回测页面使用。`"
+          description="如需清理，请前往策略配置页删除或修复异常策略。"
+        >
+          <template #action>
+            <a-button size="small" @click="goToStrategies">去策略配置清理</a-button>
+          </template>
+        </a-alert>
       </a-form>
 
       <a-form layout="inline">
@@ -77,7 +89,10 @@
 
       <a-table :data-source="rows" :columns="columns" row-key="id" :loading="loading" :pagination="pagination" :scroll="{ x: 'max-content' }" @change="handleTableChange">
         <template #bodyCell="{ column, record, text }">
-          <template v-if="column.key === 'status'">
+          <template v-if="column.key === 'ownerUserId'">
+            {{ formatOwnerUserId(record.ownerUserId) }}
+          </template>
+          <template v-else-if="column.key === 'status'">
             <a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag>
           </template>
           <template v-else-if="column.key === 'dataSource'">
@@ -151,6 +166,7 @@
 
         <a-descriptions :column="2" bordered size="small">
           <a-descriptions-item label="策略配置">{{ detailJob.profileName }}</a-descriptions-item>
+          <a-descriptions-item v-if="auth.isAdmin" label="所属用户">{{ formatOwnerUserId(detailJob.ownerUserId) }}</a-descriptions-item>
           <a-descriptions-item label="策略类型">{{ detailJob.strategyType }}</a-descriptions-item>
           <a-descriptions-item label="状态">
             <a-tag :color="statusColor(detailJob.status)">{{ statusLabel(detailJob.status) }}</a-tag>
@@ -244,6 +260,8 @@ import { message } from 'ant-design-vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { useAuthStore } from '@/stores/auth'
+
 import { fetchBacktestDataOptions, fetchBacktestDetail, pageBacktestDataFiles, pageBacktests, pageBacktestTrades, runBacktest, stopBacktest } from '@/api/backtests'
 import { fetchStrategyDefinitions, fetchStrategyProfiles } from '@/api/strategies'
 import type { BacktestDataFileItem, BacktestDataOptions, BacktestJobItem, BacktestTradeItem } from '@/types/backtest'
@@ -251,6 +269,7 @@ import type { StrategyDefinition, StrategyFieldSchema, StrategyProfile } from '@
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 const loading = ref(false)
 const runLoading = ref(false)
 const detailOpen = ref(false)
@@ -259,6 +278,7 @@ const runConfirmOpen = ref(false)
 const rows = ref<BacktestJobItem[]>([])
 const definitions = ref<StrategyDefinition[]>([])
 const profiles = ref<StrategyProfile[]>([])
+const invalidStrategyProfileCount = ref(0)
 const dataFiles = ref<BacktestDataFileItem[]>([])
 const detailJob = ref<BacktestJobItem | null>(null)
 const detailTrades = ref<BacktestTradeItem[]>([])
@@ -311,19 +331,23 @@ const statusOptions = [
   { label: '不支持', value: 'unsupported' },
 ]
 
-const columns = [
-  { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
-  { title: '策略配置', dataIndex: 'profileName', key: 'profileName', width: 180 },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 120 },
-  { title: '数据来源', key: 'dataSource', width: 240 },
-  { title: '预计完成时间', dataIndex: 'estimatedFinishAt', key: 'estimatedFinishAt', width: 180 },
-  { title: '收益率', key: 'totalReturn', width: 120 },
-  { title: '最大回撤', key: 'maxDrawdown', width: 120 },
-  { title: '交易数', key: 'tradeCount', width: 120 },
-  { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
-  { title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 180 },
-  { title: '操作', key: 'actions', width: 180 },
-]
+const columns = computed(() => {
+  const ownerColumn = auth.isAdmin ? [{ title: '所属用户', dataIndex: 'ownerUserId', key: 'ownerUserId', width: 120 }] : []
+  return [
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
+    ...ownerColumn,
+    { title: '策略配置', dataIndex: 'profileName', key: 'profileName', width: 180 },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 120 },
+    { title: '数据来源', key: 'dataSource', width: 240 },
+    { title: '预计完成时间', dataIndex: 'estimatedFinishAt', key: 'estimatedFinishAt', width: 180 },
+    { title: '收益率', key: 'totalReturn', width: 120 },
+    { title: '最大回撤', key: 'maxDrawdown', width: 120 },
+    { title: '交易数', key: 'tradeCount', width: 120 },
+    { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
+    { title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 180 },
+    { title: '操作', key: 'actions', width: 180 },
+  ]
+})
 
 const tradeColumns = [
   { title: '时间', dataIndex: 'barTime', key: 'barTime', width: 180 },
@@ -376,6 +400,13 @@ function formatDateTime(value: string | null | undefined) {
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : value
+}
+
+function formatOwnerUserId(value: number | null | undefined) {
+  if (!value) {
+    return '-'
+  }
+  return value === auth.currentUser?.id ? `${value}（我）` : String(value)
 }
 
 function formatNumber(value: number | string | null | undefined) {
@@ -483,9 +514,10 @@ function progressPercentLabel(job: BacktestJobItem | null) {
 }
 
 async function loadDefinitionsAndProfiles() {
-  const [definitionRows, profileRows] = await Promise.all([fetchStrategyDefinitions(), fetchStrategyProfiles()])
+  const [definitionRows, profileResult] = await Promise.all([fetchStrategyDefinitions(), fetchStrategyProfiles()])
   definitions.value = definitionRows
-  profiles.value = profileRows.map((item) => ({
+  invalidStrategyProfileCount.value = profileResult.invalidItems.length
+  profiles.value = profileResult.items.map((item) => ({
     ...item,
     definition: definitionRows.find((definition) => definition.strategyType === item.strategyType),
   }))
@@ -610,6 +642,10 @@ async function handleStopJob(record: BacktestJobItem) {
 
 function goToHistoryData() {
   router.push({ name: 'backtest-data' })
+}
+
+function goToStrategies() {
+  router.push('/strategies')
 }
 
 function handleSearch() {

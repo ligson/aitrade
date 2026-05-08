@@ -3,6 +3,7 @@ from .models_admin import CaptchaSessionModel
 from .models_admin import SignalSourceProfileModel
 from .models_admin import StrategyProfileModel
 from .models_admin import SystemSettingProfileModel
+from .models_admin import UserExchangeSettingModel
 from .models_admin import UserModel
 from .models_backtest import BacktestJobModel
 from .models_backtest import BacktestTradeModel
@@ -22,6 +23,7 @@ __all__ = [
     'StrategyProfileModel',
     'SignalSourceProfileModel',
     'SystemSettingProfileModel',
+    'UserExchangeSettingModel',
     'BacktestJobModel',
     'BacktestTradeModel',
     'TradeTaskProfileModel',

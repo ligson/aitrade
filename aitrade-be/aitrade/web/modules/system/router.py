@@ -6,11 +6,13 @@ from pydantic import BaseModel
 from ...api_response import page_response
 from ...api_response import success_response
 from ...dependencies import get_config
+from ...dependencies import get_current_user
 from ...dependencies import require_admin
 from ....config.config_file import Config
 from .deployment_config_service import DeploymentConfigService
 from .service import SystemService
 from .trade_task_service import TradeTaskService
+from .user_exchange_service import UserExchangeService
 
 router = APIRouter()
 
@@ -49,6 +51,17 @@ class SystemDeploymentSettingsSaveRequest(BaseModel):
     editable: SystemDeploymentSettingsEditableRequest
 
 
+class UserExchangeSettingsEditableRequest(BaseModel):
+    exchangeType: str
+    apiKey: str = ''
+    apiSecret: str = ''
+    password: str = ''
+
+
+class UserExchangeSettingsSaveRequest(BaseModel):
+    editable: UserExchangeSettingsEditableRequest
+
+
 class SystemLogFilesRequest(BaseModel):
     offset: int = 0
     size: int = 20
@@ -77,6 +90,14 @@ class TradeTaskStartRequest(BaseModel):
     tradeTaskProfileId: int
 
 
+class TradeTaskStatusRequest(BaseModel):
+    runnerName: str
+
+
+class TradeTaskStopRequest(BaseModel):
+    runnerName: str
+
+
 class TradeTaskProfileSaveRequest(BaseModel):
     id: int | None = None
     name: str
@@ -92,7 +113,7 @@ class TradeTaskProfileSaveRequest(BaseModel):
     slippageRate: float = 0
     dailyLossStopEnabled: bool = False
     dailyLossStopThreshold: float = 100
-    runnerName: str = 'default'
+    runnerName: str | None = None
 
 
 class TradeTaskProfileDeleteRequest(BaseModel):
@@ -158,52 +179,82 @@ def system_log_content(
     return success_response(service.read_log_content(payload.filename, payload.tailLines))
 
 
+@router.post('/user-exchange/settings')
+def user_exchange_settings(
+    config: Config = Depends(get_config),
+    current_user: dict = Depends(get_current_user),
+):
+    service = UserExchangeService(config)
+    return success_response(service.get_settings(current_user=current_user))
+
+
+@router.post('/user-exchange/settings/save')
+def user_exchange_settings_save(
+    payload: UserExchangeSettingsSaveRequest,
+    config: Config = Depends(get_config),
+    current_user: dict = Depends(get_current_user),
+):
+    service = UserExchangeService(config)
+    return success_response(service.save_settings(payload.model_dump(), current_user=current_user))
+
+
 @router.post('/trade-task/profiles/list')
 def trade_task_profile_list(
     request: Request,
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     service: TradeTaskService = request.app.state.trade_task_service
-    return success_response(service.list_profiles())
+    return success_response(service.list_profiles(current_user))
 
 
 @router.post('/trade-task/profiles/save')
 def trade_task_profile_save(
     payload: TradeTaskProfileSaveRequest,
     request: Request,
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     service: TradeTaskService = request.app.state.trade_task_service
-    return success_response(service.save_profile(payload.model_dump()))
+    return success_response(service.save_profile(payload.model_dump(), current_user))
 
 
 @router.post('/trade-task/profiles/delete')
 def trade_task_profile_delete(
     payload: TradeTaskProfileDeleteRequest,
     request: Request,
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     service: TradeTaskService = request.app.state.trade_task_service
-    return success_response(service.delete_profile(payload.id))
+    return success_response(service.delete_profile(payload.id, current_user))
+
+
+@router.post('/trade-task/statuses')
+def trade_task_statuses(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    service: TradeTaskService = request.app.state.trade_task_service
+    return success_response(service.list_statuses(current_user))
 
 
 @router.post('/trade-task/status')
 def trade_task_status(
+    payload: TradeTaskStatusRequest,
     request: Request,
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     service: TradeTaskService = request.app.state.trade_task_service
-    return success_response(service.get_status())
+    return success_response(service.get_status(payload.runnerName, current_user))
 
 
 @router.post('/trade-task/logs/page')
 def trade_task_log_page(
     payload: TradeTaskLogPageRequest,
     request: Request,
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     service: TradeTaskService = request.app.state.trade_task_service
     total, rows = service.page_logs(
+        current_user=current_user,
         offset=payload.offset,
         size=payload.size,
         runner_name=payload.runnerName,
@@ -229,8 +280,9 @@ def trade_task_start(
 
 @router.post('/trade-task/stop')
 def trade_task_stop(
+    payload: TradeTaskStopRequest,
     request: Request,
-    _: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     service: TradeTaskService = request.app.state.trade_task_service
-    return success_response(service.stop())
+    return success_response(service.stop(payload.runnerName, current_user))

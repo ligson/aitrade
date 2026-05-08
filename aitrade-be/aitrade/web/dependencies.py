@@ -49,3 +49,40 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     if not current_user.get('isAdmin'):
         raise ForbiddenError('仅管理员可执行该操作')
     return current_user
+
+
+def is_admin_user(current_user: dict | None) -> bool:
+    return bool((current_user or {}).get('isAdmin'))
+
+
+def resolve_visible_owner_user_id(current_user: dict) -> int | None:
+    if is_admin_user(current_user):
+        return None
+    return int(current_user.get('id') or 0)
+
+
+def ensure_owner_access(current_user: dict, owner_user_id: int | None) -> None:
+    if owner_user_id is None:
+        if is_admin_user(current_user):
+            return
+        raise ForbiddenError('无权访问其他用户数据')
+    if is_admin_user(current_user):
+        return
+    if int(current_user.get('id') or 0) != int(owner_user_id):
+        raise ForbiddenError('无权访问其他用户数据')
+
+
+def apply_owner_scope(query, model, current_user: dict):
+    owner_user_id = resolve_visible_owner_user_id(current_user)
+    if owner_user_id is None:
+        return query
+    return query.filter(model.owner_user_id == owner_user_id)
+
+
+def get_primary_admin_user_id(database_url: str) -> int | None:
+    session_factory = get_session_factory(database_url)
+    with session_factory() as session:
+        model = session.query(UserModel).filter(UserModel.is_admin.is_(True)).order_by(UserModel.id.asc()).first()
+        if model is None:
+            return None
+        return int(model.id)

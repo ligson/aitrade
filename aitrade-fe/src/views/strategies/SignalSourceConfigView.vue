@@ -12,7 +12,10 @@
       </div>
       <a-table :data-source="tableRows" :columns="columns" row-key="id" :pagination="false" :scroll="{ x: 'max-content' }">
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'sourceType'">
+          <template v-if="column.key === 'ownerUserId'">
+            {{ formatOwnerUserId(record.ownerUserId) }}
+          </template>
+          <template v-else-if="column.key === 'sourceType'">
             {{ record.definition?.displayName || record.sourceType }}
           </template>
           <template v-else-if="column.key === 'enabled'">
@@ -39,6 +42,7 @@
       <template v-if="detailProfile">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="名称">{{ detailProfile.name }}</a-descriptions-item>
+          <a-descriptions-item v-if="auth.isAdmin" label="所属用户">{{ formatOwnerUserId(detailProfile.ownerUserId) }}</a-descriptions-item>
           <a-descriptions-item label="类型">{{ detailProfile.definition?.displayName || detailProfile.sourceType }}</a-descriptions-item>
           <a-descriptions-item label="描述">{{ detailProfile.description || '-' }}</a-descriptions-item>
           <a-descriptions-item label="状态">{{ detailProfile.enabled ? '启用' : '停用' }}</a-descriptions-item>
@@ -89,12 +93,15 @@ import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
 
+import { useAuthStore } from '@/stores/auth'
+
 import StrategyParamForm from '@/components/StrategyParamForm.vue'
 import { deleteSignalSourceProfile, fetchSignalSourceDefinitions, fetchSignalSourceProfiles, saveSignalSourceProfile } from '@/api/strategies'
 import type { SignalSourceDefinition, SignalSourceFieldSchema, SignalSourceProfile } from '@/types/signalSource'
 
 type SignalSourceTableRow = SignalSourceProfile & { definition?: SignalSourceDefinition }
 
+const auth = useAuthStore()
 const definitions = ref<SignalSourceDefinition[]>([])
 const profiles = ref<SignalSourceProfile[]>([])
 const detailOpen = ref(false)
@@ -109,15 +116,19 @@ const form = reactive<{ id?: number; sourceType: string; name: string; descripti
   params: {},
 })
 
-const columns = [
-  { title: '名称', dataIndex: 'name', key: 'name', width: 220 },
-  { title: '信号源类型', dataIndex: 'sourceType', key: 'sourceType', width: 180 },
-  { title: '运行时', key: 'runtimeSupported', width: 140 },
-  { title: '描述', dataIndex: 'description', key: 'description', width: 260 },
-  { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 100 },
-  { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
-  { title: '操作', key: 'actions', width: 180 },
-]
+const columns = computed(() => {
+  const ownerColumn = auth.isAdmin ? [{ title: '所属用户', dataIndex: 'ownerUserId', key: 'ownerUserId', width: 120 }] : []
+  return [
+    { title: '名称', dataIndex: 'name', key: 'name', width: 220 },
+    ...ownerColumn,
+    { title: '信号源类型', dataIndex: 'sourceType', key: 'sourceType', width: 180 },
+    { title: '运行时', key: 'runtimeSupported', width: 140 },
+    { title: '描述', dataIndex: 'description', key: 'description', width: 260 },
+    { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 100 },
+    { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
+    { title: '操作', key: 'actions', width: 180 },
+  ]
+})
 
 const tableRows = computed<SignalSourceTableRow[]>(() =>
   profiles.value.map((profile) => ({
@@ -153,6 +164,13 @@ function formatDateTime(value: string | null | undefined) {
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : value
+}
+
+function formatOwnerUserId(value: number | null | undefined) {
+  if (!value) {
+    return '-'
+  }
+  return value === auth.currentUser?.id ? `${value}（我）` : String(value)
 }
 
 function formatFallbackValue(value: unknown) {

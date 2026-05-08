@@ -12,14 +12,15 @@ class TradeStore(Protocol):
 
     def upsert_position_state(
         self,
+        owner_user_id: int,
         symbol: str,
         position: Dict[str, Any],
         source_trade_id: Optional[int] = None,
     ) -> None: ...
 
-    def delete_position_state(self, symbol: str) -> None: ...
+    def delete_position_state(self, owner_user_id: int, symbol: str) -> None: ...
 
-    def get_position_state(self, symbol: str) -> Optional[Dict[str, Any]]: ...
+    def get_position_state(self, owner_user_id: int, symbol: str) -> Optional[Dict[str, Any]]: ...
 
     def query_trade_records(
         self,
@@ -33,6 +34,7 @@ class TradeStore(Protocol):
         run_id: Optional[int] = None,
         created_from: Optional[str] = None,
         created_to: Optional[str] = None,
+        owner_user_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]: ...
 
     def count_trade_records(
@@ -45,10 +47,11 @@ class TradeStore(Protocol):
         run_id: Optional[int] = None,
         created_from: Optional[str] = None,
         created_to: Optional[str] = None,
+        owner_user_id: Optional[int] = None,
     ) -> int: ...
 
-    def query_position_states(self) -> List[Dict[str, Any]]: ...
+    def query_position_states(self, owner_user_id: Optional[int] = None) -> List[Dict[str, Any]]: ...
 
     def get_daily_loss_summary(self, run_id: int, created_from: str, created_to: str) -> Dict[str, Any]: ...
 
-    def list_trade_symbols(self) -> List[str]: ...
+    def list_trade_symbols(self, owner_user_id: Optional[int] = None) -> List[str]: ...

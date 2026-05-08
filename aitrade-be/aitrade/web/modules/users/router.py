@@ -32,6 +32,7 @@ class UserUpdateRequest(BaseModel):
     email: str
     nickname: str
     remark: str = ''
+    isAdmin: bool = False
 
 
 class UserResetPasswordRequest(BaseModel):

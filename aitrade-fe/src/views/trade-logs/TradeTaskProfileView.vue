@@ -5,8 +5,19 @@
         type="info"
         show-icon
         message="这里维护的是可启动的交易任务配置。"
-        description="任务级参数通过页面配置并入库保存；启动时会生成运行快照，后续修改不会影响已运行任务。"
+        description="任务级参数通过页面配置并入库保存；启动时会生成运行快照，后续修改不会影响已运行任务。系统会为每条任务配置自动分配独立 runner，当前版本暂不支持同一交易对并发运行。"
       />
+      <a-alert
+        v-if="invalidStrategyProfileCount > 0"
+        type="warning"
+        show-icon
+        :message="`检测到 ${invalidStrategyProfileCount} 条异常策略配置，已自动跳过，不影响当前页面可用配置加载。`"
+        description="如需清理，请前往策略配置页删除或修复异常策略。"
+      >
+        <template #action>
+          <a-button size="small" @click="goToStrategies">去策略配置清理</a-button>
+        </template>
+      </a-alert>
 
       <a-card size="small" title="交易任务配置">
         <a-space direction="vertical" size="middle" style="width: 100%">
@@ -17,8 +28,9 @@
           <a-table :data-source="profiles" :columns="profileColumns" row-key="id" :pagination="false" :scroll="{ x: 'max-content' }">
             <template #bodyCell="{ column, record, text }">
               <template v-if="column.key === 'strategyProfileName'">
-                <div>{{ record.strategyProfileName || '-' }}</div>
-                <div v-if="record.strategyProfile?.fusionSummary" class="cell-meta">{{ formatFusionSummary(record.strategyProfile.fusionSummary) }}</div>
+                <div>{{ record.missingStrategyProfile ? '关联策略异常或已删除' : (record.strategyProfileName || '-') }}</div>
+                <div v-if="record.missingStrategyProfile" class="cell-meta cell-meta-warning">请前往策略配置页清理异常策略后，再更新这条任务配置。</div>
+                <div v-else-if="record.strategyProfile?.fusionSummary" class="cell-meta">{{ formatFusionSummary(record.strategyProfile.fusionSummary) }}</div>
               </template>
               <template v-else-if="column.key === 'enabled'">
                 <a-tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled ? '启用' : '停用' }}</a-tag>
@@ -60,7 +72,7 @@
           <a-descriptions-item label="配置名称">{{ detailProfile.name }}</a-descriptions-item>
           <a-descriptions-item label="描述">{{ detailProfile.description || '-' }}</a-descriptions-item>
           <a-descriptions-item label="状态">{{ detailProfile.enabled ? '启用' : '停用' }}</a-descriptions-item>
-          <a-descriptions-item label="策略配置">{{ detailProfile.strategyProfileName || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="策略配置">{{ detailProfile.missingStrategyProfile ? '关联策略异常或已删除' : (detailProfile.strategyProfileName || '-') }}</a-descriptions-item>
           <a-descriptions-item label="策略类型">{{ strategyTypeLabel(detailProfile.strategyType) }}</a-descriptions-item>
           <a-descriptions-item label="交易对">{{ detailProfile.symbol }}</a-descriptions-item>
           <a-descriptions-item label="周期">{{ detailProfile.timeframe }}</a-descriptions-item>
@@ -70,6 +82,7 @@
           <a-descriptions-item label="滑点率">{{ formatRate(detailProfile.slippageRate) }}</a-descriptions-item>
           <a-descriptions-item label="单日亏损停机">{{ detailProfile.dailyLossStopEnabled ? '已启用' : '关闭' }}</a-descriptions-item>
           <a-descriptions-item label="单日亏损阈值">{{ formatNumber(detailProfile.dailyLossStopThreshold) }}</a-descriptions-item>
+          <a-descriptions-item label="Runner">{{ detailProfile.runnerName }}</a-descriptions-item>
           <a-descriptions-item label="创建时间">{{ formatDateTime(detailProfile.createdAt) }}</a-descriptions-item>
           <a-descriptions-item label="更新时间">{{ formatDateTime(detailProfile.updatedAt) }}</a-descriptions-item>
         </a-descriptions>
@@ -172,6 +185,7 @@ import type { TradeMode, TradeTaskProfile } from '@/types/system'
 
 type TradeTaskProfileRow = TradeTaskProfile & {
   strategyProfile?: StrategyProfile
+  missingStrategyProfile?: boolean
 }
 
 const router = useRouter()
@@ -179,6 +193,7 @@ const detailOpen = ref(false)
 const editOpen = ref(false)
 const profiles = ref<TradeTaskProfileRow[]>([])
 const strategyProfiles = ref<StrategyProfile[]>([])
+const invalidStrategyProfileCount = ref(0)
 const supportedTimeframes = ref<string[]>([])
 const detailProfile = ref<TradeTaskProfileRow | null>(null)
 
@@ -196,7 +211,6 @@ const form = reactive<{
   slippageRate: number
   dailyLossStopEnabled: boolean
   dailyLossStopThreshold: number
-  runnerName: string
 }>({
   name: '',
   description: '',
@@ -210,7 +224,6 @@ const form = reactive<{
   slippageRate: 0,
   dailyLossStopEnabled: false,
   dailyLossStopThreshold: 100,
-  runnerName: 'default',
 })
 
 const profileColumns = [
@@ -339,7 +352,6 @@ async function resetForm() {
   form.slippageRate = 0
   form.dailyLossStopEnabled = false
   form.dailyLossStopThreshold = 100
-  form.runnerName = 'default'
   await loadSettings()
 }
 
@@ -362,7 +374,6 @@ function openEdit(profile: TradeTaskProfileRow) {
   form.slippageRate = profile.slippageRate
   form.dailyLossStopEnabled = profile.dailyLossStopEnabled
   form.dailyLossStopThreshold = profile.dailyLossStopThreshold
-  form.runnerName = profile.runnerName
   editOpen.value = true
 }
 
@@ -379,16 +390,26 @@ function goToControl(profileId: number) {
   router.push({ path: '/trade-task-control', query: { profileId: String(profileId) } })
 }
 
+function goToStrategies() {
+  router.push('/strategies')
+}
+
 async function loadProfiles() {
   const profileList = await fetchTradeTaskProfiles()
-  profiles.value = profileList.map((profile) => ({
-    ...profile,
-    strategyProfile: strategyProfiles.value.find((item) => item.id === profile.strategyProfileId),
-  }))
+  profiles.value = profileList.map((profile) => {
+    const strategyProfile = strategyProfiles.value.find((item) => item.id === profile.strategyProfileId)
+    return {
+      ...profile,
+      strategyProfile,
+      missingStrategyProfile: Boolean(profile.strategyProfileId) && strategyProfile == null,
+    }
+  })
 }
 
 async function loadStrategyProfiles() {
-  strategyProfiles.value = await fetchStrategyProfiles()
+  const data = await fetchStrategyProfiles()
+  strategyProfiles.value = data.items
+  invalidStrategyProfileCount.value = data.invalidItems.length
 }
 
 async function loadSettings() {
@@ -420,7 +441,6 @@ async function submitForm() {
     slippageRate: form.slippageRate,
     dailyLossStopEnabled: form.dailyLossStopEnabled,
     dailyLossStopThreshold: form.dailyLossStopThreshold,
-    runnerName: form.runnerName,
   })
   message.success('交易任务配置已保存')
   editOpen.value = false
@@ -468,6 +488,10 @@ onMounted(async () => {
   color: #8c8c8c;
   font-size: 12px;
   white-space: normal;
+}
+
+.cell-meta-warning {
+  color: #d46b08;
 }
 
 :deep(.ant-table-thead > tr > th) {

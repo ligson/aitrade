@@ -18,6 +18,9 @@ from ....db.session import get_engine
 from ....db.session import get_session_factory
 from ....trade.backtest.data_service import BacktestDataService
 from ....trade.backtest.engine import BacktestStoppedError
+from ...dependencies import apply_owner_scope
+from ...dependencies import ensure_owner_access
+from ...dependencies import get_primary_admin_user_id
 from ...exceptions import NotFoundError
 from ...exceptions import ValidationError
 from ..system.service import SystemService
@@ -144,9 +147,15 @@ class BacktestService:
             data_file = ''
 
         with self.Session() as session:
+            owner_user_id = int(current_user.get('id') or 0)
+            if owner_user_id <= 0:
+                raise ValidationError('当前用户信息无效')
             profile = session.get(StrategyProfileModel, strategy_profile_id)
             if profile is None:
                 raise NotFoundError('策略配置不存在')
+            ensure_owner_access(current_user, profile.owner_user_id)
+            if int(profile.owner_user_id or 0) != owner_user_id:
+                raise ValidationError('回测任务只能引用所属用户自己的策略配置')
             params = json.loads(profile.params_json)
             if profile.strategy_type == 'btc_spot_trend_breakout' and timeframe != '1h':
                 raise ValidationError('BTC 现货趋势突破策略回测周期当前固定为 1h')
@@ -154,6 +163,7 @@ class BacktestService:
             status = STATUS_PENDING if profile.strategy_type in SUPPORTED_STRATEGY_TYPES else STATUS_UNSUPPORTED
             error_message = '' if status == STATUS_PENDING else '当前仅支持 btc_spot_breakout 与 btc_spot_trend_breakout 策略离线回测'
             job = BacktestJobModel(
+                owner_user_id=owner_user_id,
                 strategy_type=profile.strategy_type,
                 strategy_profile_id=profile.id,
                 profile_name=profile.name,
@@ -187,13 +197,14 @@ class BacktestService:
         if status == STATUS_PENDING:
             thread = Thread(target=self._run_job, args=(job_id,), daemon=True)
             thread.start()
-        return self.get_job_detail(job_id)
+        return self.get_job_detail(job_id, current_user)
 
-    def stop_job(self, job_id: int) -> dict[str, Any]:
+    def stop_job(self, job_id: int, current_user: dict[str, Any]) -> dict[str, Any]:
         with self.Session() as session:
             job = session.get(BacktestJobModel, job_id)
             if job is None:
                 raise NotFoundError('回测任务不存在')
+            ensure_owner_access(current_user, job.owner_user_id)
             if job.status in TERMINAL_STATUSES or job.status == STATUS_STOP_REQUESTED:
                 return self._serialize_job(job)
             if job.status not in {STATUS_PENDING, STATUS_RUNNING}:
@@ -318,9 +329,9 @@ class BacktestService:
                 job.last_progress_at = now
                 session.commit()
 
-    def page_jobs(self, offset: int, size: int, keyword: str = '', status: str = '') -> tuple[int, list[dict[str, Any]]]:
+    def page_jobs(self, current_user: dict[str, Any], offset: int, size: int, keyword: str = '', status: str = '') -> tuple[int, list[dict[str, Any]]]:
         with self.Session() as session:
-            query = session.query(BacktestJobModel)
+            query = apply_owner_scope(session.query(BacktestJobModel), BacktestJobModel, current_user)
             if keyword.strip():
                 like_value = f'%{keyword.strip()}%'
                 query = query.filter(
@@ -335,18 +346,20 @@ class BacktestService:
             rows = [self._serialize_job(model) for model in models]
             return total, rows
 
-    def get_job_detail(self, job_id: int) -> dict[str, Any]:
+    def get_job_detail(self, job_id: int, current_user: dict[str, Any]) -> dict[str, Any]:
         with self.Session() as session:
             model = session.get(BacktestJobModel, job_id)
             if model is None:
                 raise NotFoundError('回测任务不存在')
+            ensure_owner_access(current_user, model.owner_user_id)
             return self._serialize_job(model)
 
-    def page_job_trades(self, job_id: int, offset: int, size: int) -> tuple[int, list[dict[str, Any]]]:
+    def page_job_trades(self, job_id: int, offset: int, size: int, current_user: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
         with self.Session() as session:
             job = session.get(BacktestJobModel, job_id)
             if job is None:
                 raise NotFoundError('回测任务不存在')
+            ensure_owner_access(current_user, job.owner_user_id)
             query = session.query(BacktestTradeModel).filter(BacktestTradeModel.job_id == job_id)
             total = query.count()
             models = query.order_by(BacktestTradeModel.id.asc()).offset(offset).limit(size).all()
@@ -372,6 +385,7 @@ class BacktestService:
     def _ensure_backtest_job_schema(self) -> None:
         columns = {column['name'] for column in inspect(self.engine).get_columns('backtest_jobs')}
         column_definitions = {
+            'owner_user_id': 'INTEGER',
             'stop_requested_at': 'VARCHAR',
             'progress_current': 'INTEGER',
             'progress_total': 'INTEGER',
@@ -379,12 +393,16 @@ class BacktestService:
             'last_progress_at': 'VARCHAR',
             'slippage_rate': 'FLOAT NOT NULL DEFAULT 0',
         }
-        missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
-        if not missing_columns:
-            return
+        fallback_owner_user_id = get_primary_admin_user_id(self.database_url)
         with self.engine.begin() as connection:
+            missing_columns = {name: ddl for name, ddl in column_definitions.items() if name not in columns}
             for name, ddl in missing_columns.items():
                 connection.execute(text(f'ALTER TABLE backtest_jobs ADD COLUMN {name} {ddl}'))
+            connection.execute(
+                text('UPDATE backtest_jobs SET owner_user_id = :owner_user_id WHERE owner_user_id IS NULL'),
+                {'owner_user_id': fallback_owner_user_id},
+            )
+            connection.execute(text('CREATE INDEX IF NOT EXISTS idx_backtest_jobs_owner_created_at ON backtest_jobs (owner_user_id, created_at)'))
 
     def _should_stop(self, job_id: int) -> bool:
         with self.Session() as session:
@@ -420,6 +438,7 @@ class BacktestService:
             progress_percent = round(progress_current / progress_total * 100, 2)
         return {
             'id': model.id,
+            'ownerUserId': model.owner_user_id,
             'strategyType': model.strategy_type,
             'strategyProfileId': model.strategy_profile_id,
             'profileName': model.profile_name,

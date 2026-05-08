@@ -96,8 +96,7 @@ const menuGroups: MenuGroup[] = [
     title: '交易中心',
     icon: FundOutlined,
     children: [
-      { key: 'trade-task-profiles', title: '交易任务配置', icon: SettingOutlined, routePath: '/trade-task-profiles' },
-      { key: 'trade-task-control', title: '交易任务控制', icon: DashboardOutlined, routePath: '/trade-task-control' },
+      { key: 'trade-tasks', title: '任务中心', icon: DashboardOutlined, routePath: '/trade-tasks' },
       { key: 'trade-task-logs', title: '任务日志', icon: FileTextOutlined, routePath: '/trade-task-logs' },
       { key: 'trade-logs', title: '交易日志', icon: FundOutlined, routePath: '/trade-logs' },
     ],
@@ -125,6 +124,8 @@ const menuGroups: MenuGroup[] = [
     title: '系统管理',
     icon: TeamOutlined,
     children: [
+      // 交易所设置需要对所有登录用户可见，其他系统页继续只对管理员展示。
+      { key: 'user-exchange-settings', title: '交易所设置', icon: SettingOutlined, routePath: '/user-exchange-settings' },
       // 系统设置已拆成概览、AI、交易、数据和日志多个入口，这里需要与路由和概览页导航保持一致。
       { key: 'system-settings', title: '系统概览', icon: SettingOutlined, routePath: '/system-settings', adminOnly: true },
       { key: 'system-deployment-settings', title: '部署设置', icon: DatabaseOutlined, routePath: '/system-deployment-settings', adminOnly: true },
@@ -159,7 +160,7 @@ const visibleMenuGroups = computed(() =>
 )
 
 const currentMenuItem = computed(() => {
-  const currentPath = route.path || '/trade-logs'
+  const currentPath = route.path || '/trade-tasks'
   for (const group of visibleMenuGroups.value) {
     const item = group.children.find((child) => child.routePath === currentPath)
     if (item) {
@@ -170,7 +171,7 @@ const currentMenuItem = computed(() => {
 })
 
 const currentGroupKey = computed(() => {
-  const currentPath = route.path || '/trade-logs'
+  const currentPath = route.path || '/trade-tasks'
   return visibleMenuGroups.value.find((group) => group.children.some((item) => item.routePath === currentPath))?.key || visibleMenuGroups.value[0]?.key || ''
 })
 

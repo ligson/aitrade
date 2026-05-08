@@ -21,6 +21,7 @@ export interface SignalSourceDefinition {
 
 export interface SignalSourceProfile {
   id: number
+  ownerUserId: number | null
   sourceType: string
   name: string
   description: string

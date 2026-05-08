@@ -7,9 +7,19 @@
           <a-button type="primary" @click="openCreate">新增配置</a-button>
         </a-space>
       </div>
+      <a-alert
+        v-if="hasInvalidProfiles"
+        type="warning"
+        show-icon
+        :message="`检测到 ${invalidProfiles.length} 条异常策略配置，已从正常列表中自动跳过。`"
+        description="这些异常配置不会再阻塞任务配置、任务控制和回测页面；请在下方清理或修复。"
+      />
       <a-table :data-source="tableRows" :columns="columns" row-key="id" :pagination="false" :scroll="{ x: 'max-content' }">
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'strategyType'">
+          <template v-if="column.key === 'ownerUserId'">
+            {{ formatOwnerUserId(record.ownerUserId) }}
+          </template>
+          <template v-else-if="column.key === 'strategyType'">
             <div>{{ record.definition?.displayName || record.strategyType }}</div>
             <div v-if="record.definition?.fixedConstraints?.length" class="cell-meta">{{ formatFixedConstraints(record.definition) }}</div>
           </template>
@@ -34,12 +44,37 @@
           </template>
         </template>
       </a-table>
+      <a-card v-if="hasInvalidProfiles" size="small" title="异常策略配置">
+        <a-table :data-source="invalidProfiles" :columns="invalidColumns" row-key="id" :pagination="false" :scroll="{ x: 'max-content' }">
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'strategyType'">
+              <div>{{ strategyTypeDisplayLabel(record.strategyType) }}</div>
+            </template>
+            <template v-else-if="column.key === 'enabled'">
+              <a-tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled ? '启用' : '停用' }}</a-tag>
+            </template>
+            <template v-else-if="column.key === 'errorStage'">
+              {{ errorStageLabel(record.errorStage) }}
+            </template>
+            <template v-else-if="column.key === 'errorMessage'">
+              <span class="summary-text">{{ record.errorMessage }}</span>
+            </template>
+            <template v-else-if="column.key === 'updatedAt'">
+              {{ formatDateTime(record.updatedAt) }}
+            </template>
+            <template v-else-if="column.key === 'actions'">
+              <a-button type="link" danger @click="removeProfile(record.id)">删除</a-button>
+            </template>
+          </template>
+        </a-table>
+      </a-card>
     </a-space>
 
     <a-drawer v-model:open="detailOpen" title="策略详情" width="560">
       <template v-if="detailProfile">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="配置名称">{{ detailProfile.name }}</a-descriptions-item>
+          <a-descriptions-item v-if="auth.isAdmin" label="所属用户">{{ formatOwnerUserId(detailProfile.ownerUserId) }}</a-descriptions-item>
           <a-descriptions-item label="策略类型">{{ detailProfile.definition?.displayName || detailProfile.strategyType }}</a-descriptions-item>
           <a-descriptions-item label="策略分类">{{ strategyCategoryLabel(detailProfile.definition?.strategyCategory) }}</a-descriptions-item>
           <a-descriptions-item label="配置模式">{{ configModeLabel(detailProfile.definition?.configMode) }}</a-descriptions-item>
@@ -106,17 +141,21 @@ import { message } from 'ant-design-vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { useAuthStore } from '@/stores/auth'
+
 import FusionStrategyBuilder from '@/components/FusionStrategyBuilder.vue'
 import StrategyParamForm from '@/components/StrategyParamForm.vue'
 import { deleteStrategyProfile, fetchSignalSourceProfiles, fetchStrategyDefinitions, fetchStrategyProfiles, saveStrategyProfile } from '@/api/strategies'
 import type { SignalSourceProfile } from '@/types/signalSource'
-import type { FusionStrategyParams, FusionSummary, StrategyCategory, StrategyDefinition, StrategyFieldSchema, StrategyProfile } from '@/types/strategy'
+import type { FusionStrategyParams, FusionSummary, InvalidStrategyProfile, StrategyCategory, StrategyDefinition, StrategyFieldSchema, StrategyProfile } from '@/types/strategy'
 
 type StrategyTableRow = StrategyProfile & { definition?: StrategyDefinition }
 
 const router = useRouter()
+const auth = useAuthStore()
 const definitions = ref<StrategyDefinition[]>([])
 const profiles = ref<StrategyProfile[]>([])
+const invalidProfiles = ref<InvalidStrategyProfile[]>([])
 const signalSourceProfiles = ref<SignalSourceProfile[]>([])
 const detailOpen = ref(false)
 const editOpen = ref(false)
@@ -130,16 +169,34 @@ const form = reactive<{ id?: number; strategyType: string; name: string; descrip
   params: {},
 })
 
-const columns = [
-  { title: '配置名称', dataIndex: 'name', key: 'name', width: 220 },
-  { title: '策略类型', dataIndex: 'strategyType', key: 'strategyType', width: 220 },
-  { title: '策略分类', key: 'strategyCategory', width: 120 },
-  { title: '融合摘要', key: 'fusionSummary', width: 260 },
-  { title: '描述', dataIndex: 'description', key: 'description', width: 260 },
-  { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 100 },
-  { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
-  { title: '操作', key: 'actions', width: 180 },
-]
+const columns = computed(() => {
+  const ownerColumn = auth.isAdmin ? [{ title: '所属用户', dataIndex: 'ownerUserId', key: 'ownerUserId', width: 120 }] : []
+  return [
+    { title: '配置名称', dataIndex: 'name', key: 'name', width: 220 },
+    ...ownerColumn,
+    { title: '策略类型', dataIndex: 'strategyType', key: 'strategyType', width: 220 },
+    { title: '策略分类', key: 'strategyCategory', width: 120 },
+    { title: '融合摘要', key: 'fusionSummary', width: 260 },
+    { title: '描述', dataIndex: 'description', key: 'description', width: 260 },
+    { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 100 },
+    { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
+    { title: '操作', key: 'actions', width: 180 },
+  ]
+})
+
+const invalidColumns = computed(() => {
+  const ownerColumn = auth.isAdmin ? [{ title: '所属用户', dataIndex: 'ownerUserId', key: 'ownerUserId', width: 120 }] : []
+  return [
+    { title: '配置名称', dataIndex: 'name', key: 'name', width: 220 },
+    ...ownerColumn,
+    { title: '策略类型', dataIndex: 'strategyType', key: 'strategyType', width: 220 },
+    { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 100 },
+    { title: '错误阶段', dataIndex: 'errorStage', key: 'errorStage', width: 120 },
+    { title: '错误原因', dataIndex: 'errorMessage', key: 'errorMessage', width: 360 },
+    { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
+    { title: '操作', key: 'actions', width: 120 },
+  ]
+})
 
 const tableRows = computed<StrategyTableRow[]>(() =>
   profiles.value.map((profile) => ({
@@ -149,6 +206,7 @@ const tableRows = computed<StrategyTableRow[]>(() =>
 )
 
 const currentDefinition = computed(() => definitions.value.find((item) => item.strategyType === form.strategyType))
+const hasInvalidProfiles = computed(() => invalidProfiles.value.length > 0)
 
 const fusionKlineProfiles = computed(() =>
   profiles.value.filter((item) => item.enabled && definitions.value.find((definition) => definition.strategyType === item.strategyType)?.usableAsFusionNode),
@@ -212,6 +270,13 @@ function formatDateTime(value: string | null | undefined) {
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : value
+}
+
+function formatOwnerUserId(value: number | null | undefined) {
+  if (!value) {
+    return '-'
+  }
+  return value === auth.currentUser?.id ? `${value}（我）` : String(value)
 }
 
 function formatFallbackValue(value: unknown) {
@@ -286,6 +351,23 @@ function formatFixedConstraints(definition?: StrategyDefinition) {
   return definition.fixedConstraints.join(' / ')
 }
 
+function strategyTypeDisplayLabel(value: string) {
+  return definitions.value.find((item) => item.strategyType === value)?.displayName || value || '-'
+}
+
+function errorStageLabel(value: string) {
+  if (value === 'json_load') {
+    return 'JSON 解析'
+  }
+  if (value === 'normalize') {
+    return '参数归一'
+  }
+  if (value === 'summarize') {
+    return '摘要生成'
+  }
+  return value || '-'
+}
+
 function formatFusionSummary(summary?: FusionSummary | null) {
   if (!summary) {
     return '-'
@@ -309,7 +391,9 @@ async function loadDefinitions() {
 }
 
 async function loadProfiles() {
-  profiles.value = await fetchStrategyProfiles()
+  const data = await fetchStrategyProfiles()
+  profiles.value = data.items
+  invalidProfiles.value = data.invalidItems
 }
 
 async function loadSignalSourceProfiles() {
@@ -376,7 +460,7 @@ async function submitForm() {
 async function removeProfile(id: number) {
   await deleteStrategyProfile(id)
   message.success('策略配置已删除')
-  profiles.value = profiles.value.filter((item) => item.id !== id)
+  await loadProfiles()
   if (detailProfile.value?.id === id) {
     detailOpen.value = false
     detailProfile.value = null
