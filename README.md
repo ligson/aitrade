@@ -25,12 +25,16 @@ bash init-env.sh
 bash package.sh
 bash query-trades.sh latest 20
 bash deploy.sh chenws-japan
+bash deploy.sh chenws-japan --mode frontend
+bash deploy.sh chenws-japan --mode backend
 ```
 
 说明：
 - `init-env.sh` 会转发到 `aitrade-be/` 初始化后端环境
 - Web 服务控制脚本位于 `aitrade-be/`：`start-web.sh / status-web.sh / stop-web.sh`
 - `query-trades.sh` 仍可用于本地查询结构化交易记录
+- `deploy.sh` 默认执行全量部署（前端 + 后端），也支持 `--mode frontend` 或 `--mode backend` 分量部署
+- 在 macOS 上执行 `package.sh` / `deploy.sh` 打包后端源码时，必须优先使用 GNU tar；若缺少 `gtar`，请先执行 `brew install gnu-tar`
 
 ## 运行态目录边界
 

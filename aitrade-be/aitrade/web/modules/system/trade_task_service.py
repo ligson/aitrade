@@ -826,6 +826,7 @@ class TradeTaskService:
                 self._save_runtime(model)
                 self._update_run_status(run_id, status=STATUS_RUNNING, started_at=now, error_message='')
                 self._append_log(
+                    owner_user_id=model.owner_user_id,
                     runner_name=runner_name,
                     run_id=run_id,
                     event_type='started',
@@ -857,6 +858,7 @@ class TradeTaskService:
                     model.updated_at = cycle_started_at
                     self._save_runtime(model)
                     self._append_log(
+                        owner_user_id=model.owner_user_id,
                         runner_name=runner_name,
                         run_id=run_id,
                         event_type='cycle_started',
@@ -885,6 +887,7 @@ class TradeTaskService:
                     model.updated_at = cycle_finished_at
                     self._save_runtime(model)
                     self._append_log(
+                        owner_user_id=model.owner_user_id,
                         runner_name=runner_name,
                         run_id=run_id,
                         event_type='cycle_finished',
@@ -911,6 +914,7 @@ class TradeTaskService:
                 self._save_runtime(model)
                 self._update_run_status(run_id, status=STATUS_STOPPED, finished_at=stopped_at)
                 self._append_log(
+                    owner_user_id=model.owner_user_id,
                     runner_name=runner_name,
                     run_id=run_id,
                     event_type='stopped',

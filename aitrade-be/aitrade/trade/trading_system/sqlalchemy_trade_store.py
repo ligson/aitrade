@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence
 
+from sqlalchemy import case
 from sqlalchemy import desc
 from sqlalchemy import func
 from sqlalchemy import inspect
@@ -169,7 +170,7 @@ class SQLAlchemyTradeStore:
                 func.coalesce(func.sum(TradeRecordModel.realized_pnl_net), 0.0),
                 func.coalesce(
                     func.sum(
-                        func.case(
+                        case(
                             (TradeRecordModel.realized_pnl_net < 0, -TradeRecordModel.realized_pnl_net),
                             else_=0.0,
                         )

@@ -301,23 +301,20 @@ class Config:
             app_cfg['data_root_dir'] = self.data_root_dir
 
         # Web 服务自身启动只要求部署级/系统级配置；
-        # 交易任务真正运行前，仍要求提供完整 AI 配置。
+        # task_runtime 会在识别出策略类型后，再决定是否严格要求 GPT 凭证，避免规则策略被误判为必须配置 AI。
         gpt_raw = app_cfg.get('gpt')
-        if self.mode == 'task_runtime':
-            gpt_cfg = _require_mapping(gpt_raw, 'app.gpt')
-        elif gpt_raw is None:
-            logging.debug('Web 模式未在 config.yaml 中提供 app.gpt，后续由系统设置补齐可编辑 AI 参数')
+        if gpt_raw is None:
+            if self.mode == 'web':
+                logging.debug('Web 模式未在 config.yaml 中提供 app.gpt，后续由系统设置补齐可编辑 AI 参数')
+            else:
+                logging.debug('任务运行态未提供 app.gpt，先按空配置装配，后续再根据策略类型决定是否强校验')
             gpt_cfg = {}
         else:
             gpt_cfg = _require_mapping(gpt_raw, 'app.gpt')
         self.gpt_provider = _require_non_empty_string(gpt_cfg.get('provider', 'deepseek'), 'app.gpt.provider')
         if self.gpt_provider not in {'deepseek', 'openai'}:
             raise ConfigValidationError("配置项 app.gpt.provider 只支持 deepseek 或 openai")
-        gpt_api_key = str(gpt_cfg.get('api_key') or '').strip()
-        if self.mode == 'task_runtime':
-            self.gpt_api_key = _require_non_empty_string(gpt_api_key, 'app.gpt.api_key')
-        else:
-            self.gpt_api_key = gpt_api_key
+        self.gpt_api_key = str(gpt_cfg.get('api_key') or '').strip()
         self.gpt_model = _require_non_empty_string(gpt_cfg.get('model', 'deepseek-chat'), 'app.gpt.model')
         gpt_base_url = gpt_cfg.get('base_url')
         if gpt_base_url is None:
@@ -416,6 +413,10 @@ class Config:
         self.trade_strategy_type = _require_non_empty_string(strategy_cfg.get('type', 'gpt'), 'app.trade.strategy.type')
         if self.trade_strategy_type not in {'gpt', 'btc_spot_breakout', 'btc_spot_trend_breakout', 'spot_multi_signal_fusion'}:
             raise ConfigValidationError("配置项 app.trade.strategy.type 只支持 gpt、btc_spot_breakout、btc_spot_trend_breakout 或 spot_multi_signal_fusion")
+        if self.mode == 'task_runtime' and self.trade_strategy_type == 'gpt':
+            self.gpt_api_key = _require_non_empty_string(self.gpt_api_key, 'app.gpt.api_key')
+        elif self.mode == 'task_runtime':
+            logging.debug('当前任务运行策略不是 GPT，跳过 app.gpt.api_key 非空校验: strategy_type=%s', self.trade_strategy_type)
 
         self.trade_strategy_gpt_config = merge_config(DEFAULT_GPT_STRATEGY_CONFIG, strategy_cfg.get('gpt', {}))
         self.trade_strategy_btc_spot_config = merge_config(DEFAULT_BTC_SPOT_BREAKOUT_CONFIG, strategy_cfg.get('btc_spot_breakout', {}))

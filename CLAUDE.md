@@ -29,11 +29,15 @@ bash init-env.sh
 bash package.sh
 bash query-trades.sh latest 20
 bash deploy.sh chenws-japan
+bash deploy.sh chenws-japan --mode frontend
+bash deploy.sh chenws-japan --mode backend
 ```
 
 说明：
 - 这些脚本会转发到 `aitrade-be/` 内执行
 - Web 服务控制脚本位于 `aitrade-be/`，不是仓库根目录
+- `deploy.sh` 默认执行全量部署（前端 + 后端），也支持 `--mode frontend` 与 `--mode backend`
+- 在 macOS 上执行后端源码打包时，必须优先使用 GNU tar；若缺少 `gtar`，请先执行 `brew install gnu-tar`
 - 如需后端详细初始化、运行、配置和实现说明，优先查看 `aitrade-be/README.md` 与 `aitrade-be/CLAUDE.md`
 
 ## 目录边界
@@ -63,7 +67,7 @@ bash deploy.sh chenws-japan
 - 当前前端已落地在 `aitrade-fe/`，默认本地开发入口是 `pnpm --dir aitrade-fe dev`。
 - 本地联调默认固定复用既有端口：前端优先复用 `127.0.0.1:5173`，后端 Web 优先复用 `127.0.0.1:18081`；启动前先检查是否已有进程在跑，能复用就不要重复启动，除非用户明确要求隔离验证，否则不要擅自切换临时端口。
 - 如需按 IDE 约定启动，优先复用项目内 `.idea/runConfigurations/fe_dev.xml` 与 `.idea/runConfigurations/be_web.xml` 对应命令和工作目录，不要在同一会话里反复新起多个前后端开发进程。
-- 修改根目录兼容脚本时，要确保它们仍然只做薄转发，不重复承载后端核心逻辑。
-- 修改仓库内 Shell 脚本时，默认必须同时兼容 macOS 与 Linux，优先使用两边都支持的命令与参数，避免随手引入 GNU 专属写法。
+- 修改根目录兼容脚本时，要确保它们仍然只做薄转发，不重复承载后端核心逻辑；部署模式解析与真实发布逻辑统一维护在 `aitrade-be/deploy.sh`。
+- 修改仓库内 Shell 脚本时，默认必须同时兼容 macOS 与 Linux，优先使用两边都支持的命令与参数，避免随手引入 GNU 专属写法；但后端源码打包在 macOS 上是例外，必须优先使用 GNU tar（`gtar` 或 PATH 中的 GNU tar）。
 - 如果修改网络相关后端代码，日志必须清晰包含错误信息、失败位置和上下文。
 - 新增或调整前端表格页时，统一遵循以下展示规则：表头文字不换行，表体内容允许换行；列宽需要按表头与关键信息设置合理最小宽度；当内容区宽度不足时，优先提供表格横向滚动，不要挤压表头或把内容顶出内容区。

@@ -142,10 +142,18 @@ bash package.sh
 
 会在 `aitrade-be/dist/` 下生成带时间戳的源码包，并默认排除本地虚拟环境、日志与 `config.yaml`。
 
+如果是在 macOS 上执行打包或部署，后端源码归档必须优先使用 GNU tar；若缺少 `gtar`，请先执行：
+
+```bash
+brew install gnu-tar
+```
+
 ## 远端部署
 
 ```bash
 bash deploy.sh chenws-japan
+bash deploy.sh chenws-japan --mode frontend
+bash deploy.sh chenws-japan --mode backend
 ```
 
 当前正式部署约定：
@@ -155,7 +163,7 @@ bash deploy.sh chenws-japan
 - 共享配置固定为 `/data/aitrade/shared/config.yaml`
 - 前端静态目录固定为 `/data/aitrade/shared/public`
 
-部署脚本默认会自动完成：
+部署脚本默认使用 `--mode all`，会自动完成：
 
 - 本地前端构建与后端打包
 - 远端上传、解压新 release，并准备共享 `config.yaml`
@@ -163,6 +171,12 @@ bash deploy.sh chenws-japan
 - 前端静态资源全量更新到 `/data/aitrade/shared/public`
 - 远端执行 `init-env.sh`、`start-web.sh`、`status-web.sh`
 - 校验共享静态目录、本机 `http://127.0.0.1:18080/health`、`current` 软链目标，以及 `openapi.json` 是否包含关键路由
+
+分量部署说明：
+
+- `--mode frontend`：只构建并上传前端静态资源到 `/data/aitrade/shared/public`，不会打后端源码包、切换 `current` 或重启 Web。
+- `--mode backend`：只打包并发布后端 release、切换 `current`、重启 Web，并校验 `/health` 与关键 OpenAPI 路由；不会重新构建或覆盖前端静态目录。
+- 兼容简写：`bash deploy.sh chenws-japan frontend|backend|all` 也可使用，但推荐统一写成 `--mode ...`。
 
 Nginx 静态站点根目录应固定指向 `/data/aitrade/shared/public`，不要指向具体 release 目录；`/api` 再反代到后端 Web 服务。
 

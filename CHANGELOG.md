@@ -2,6 +2,14 @@
 
 所有有意义的仓库变更都应记录在这里。
 
+## 2026-05-09
+
+- 修复任务运行态对 GPT 凭证的误判：`Config` 现在仅在启动 `gpt` 策略时强制校验 `app.gpt.api_key` 非空；`btc_spot_breakout`、`btc_spot_trend_breakout` 与 `spot_multi_signal_fusion` 等规则/融合策略在 `paper`、`sandbox`、`live` 任务运行时不再被错误拦截。
+- 修复交易任务运行线程写任务日志时遗漏 `owner_user_id` 的问题：`started`、`cycle_started`、`cycle_finished`、`stopped` 事件现在都会携带所属用户，避免启动后首条运行日志落库时直接抛出 `_append_log()` 缺参异常。
+- 修复单日亏损统计 SQL 构造错误：`SQLAlchemyTradeStore` 改为使用 SQLAlchemy 原生 `case(...)`，不再误用 `func.case(..., else_=...)` 导致交易任务在首轮风控检查时直接抛异常并回落为 stopped。
+- 改造部署链路：以后统一只需执行仓库根目录 `deploy.sh` 作为入口；真实逻辑继续收敛在 `aitrade-be/deploy.sh`，默认 `--mode all` 发布前后端，也支持 `--mode frontend` / `--mode backend` 分量部署；同时 `aitrade-be/package.sh` 在 macOS 上会强制优先使用 GNU tar，避免 bsdtar 归档在 Linux 远端解压时产生扩展头噪音。
+- 修复 macOS 打包脚本在 `set -o pipefail` 下的预览误失败：源码包生成后预览前 20 个文件时不再因为 `head` 提前结束管道，把成功打包误判成失败，避免 `deploy.sh` 在本地打包阶段提前中断。
+
 ## 2026-05-08
 
 - 修复 Web 控制脚本在 `current` 软链部署下的误判：`start-web.sh`、`status-web.sh`、`stop-web.sh` 现在统一使用物理目录路径识别当前仓库 Web 进程，不再因为 `current` 软链路径与进程真实 cwd 不一致，把健康服务误报为 stale。
