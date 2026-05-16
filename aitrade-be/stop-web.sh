@@ -174,6 +174,23 @@ print_log_info() {
     fi
 }
 
+normalize_stop_timeout() {
+    local raw_timeout="${AITRADE_WEB_STOP_TIMEOUT:-120}"
+
+    case "$raw_timeout" in
+        ''|*[!0-9]*)
+            printf '120\n'
+            return 0
+            ;;
+    esac
+
+    if [ "$raw_timeout" -le 0 ]; then
+        printf '120\n'
+    else
+        printf '%s\n' "$raw_timeout"
+    fi
+}
+
 cd "$ROOT_DIR"
 
 PID=''
@@ -231,10 +248,10 @@ if ! process_matches "$PID"; then
     fi
 fi
 
-info "正在停止 Web 服务，PID: $PID"
+TIMEOUT="$(normalize_stop_timeout)"
+info "正在停止 Web 服务，PID: $PID，宽限期: ${TIMEOUT}s"
 kill -TERM "$PID"
 
-TIMEOUT=30
 while [ "$TIMEOUT" -gt 0 ]; do
     if ! ps -p "$PID" > /dev/null 2>&1; then
         break

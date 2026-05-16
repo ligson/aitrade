@@ -167,10 +167,13 @@ bash deploy.sh chenws-japan --mode backend
 
 - 本地前端构建与后端打包
 - 远端上传、解压新 release，并准备共享 `config.yaml`
+- 停止当前 `current` 版本 Web 前先检查活跃交易任务；如存在 `starting / running / stop_requested` 任务，默认中止部署
 - 先停止当前 `current` 版本的 Web 服务，再切换 `current`
 - 前端静态资源全量更新到 `/data/aitrade/shared/public`
 - 远端执行 `init-env.sh`、`start-web.sh`、`status-web.sh`
 - 校验共享静态目录、本机 `http://127.0.0.1:18080/health`、`current` 软链目标，以及 `openapi.json` 是否包含关键路由
+
+后端发布前请先在管理台停止交易任务并确认状态为 `stopped`。如确认必须带任务强制重启，可设置 `AITRADE_DEPLOY_ALLOW_ACTIVE_TASKS=1` 跳过保护；这可能中断任务线程并在下次启动时产生 `stale` 状态。`stop-web.sh` 的优雅停止宽限期默认是 120 秒，可用 `AITRADE_WEB_STOP_TIMEOUT` 调整。
 
 分量部署说明：
 

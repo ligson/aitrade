@@ -49,6 +49,7 @@ usage() {
   - 兼容旧用法：bash deploy.sh chenws-japan
   - 兼容旧位置参数：第二个参数仍可继续传 remote_base_dir
   - 推荐新用法：bash deploy.sh chenws-japan --mode backend
+  - 后端部署前默认拒绝重启仍有活跃交易任务的 Web；如确认风险，可设置 AITRADE_DEPLOY_ALLOW_ACTIVE_TASKS=1 强制继续
 EOF
 }
 
@@ -223,6 +224,92 @@ upload_frontend_dist() {
     ssh "$SSH_ALIAS" "set -euo pipefail; rm -rf '$REMOTE_SHARED_PUBLIC_DIR'; mv '$REMOTE_SHARED_PUBLIC_TMP_DIR' '$REMOTE_SHARED_PUBLIC_DIR'; if command -v semanage >/dev/null 2>&1; then semanage fcontext -a -t httpd_sys_content_t '${REMOTE_SHARED_PUBLIC_DIR}(/.*)?' 2>/dev/null || semanage fcontext -m -t httpd_sys_content_t '${REMOTE_SHARED_PUBLIC_DIR}(/.*)?'; fi; restorecon -RF '$REMOTE_SHARED_PUBLIC_DIR' >/dev/null 2>&1 || true"
 }
 
+guard_no_active_trade_tasks_remote() {
+    log '检查远端是否存在活跃交易任务'
+    ssh "$SSH_ALIAS" bash -s -- "$REMOTE_CURRENT_LINK" "${AITRADE_DEPLOY_ALLOW_ACTIVE_TASKS:-}" <<'EOF'
+set -euo pipefail
+
+REMOTE_CURRENT_LINK="$1"
+ALLOW_ACTIVE_TASKS="${2:-}"
+CURRENT_BACKEND_DIR="$REMOTE_CURRENT_LINK/aitrade-be"
+
+if [ "$ALLOW_ACTIVE_TASKS" = '1' ]; then
+    echo '[deploy][WARN] 已设置 AITRADE_DEPLOY_ALLOW_ACTIVE_TASKS=1，跳过活跃交易任务保护。'
+    echo '[deploy][WARN] 如果当前有交易任务正在运行，本次重启可能中断任务线程并产生 stale 状态。'
+    exit 0
+fi
+
+if [ ! -d "$CURRENT_BACKEND_DIR" ]; then
+    echo '[deploy] 当前未发现可检查的 current Web 目录，跳过交易任务检查。'
+    exit 0
+fi
+
+cd "$CURRENT_BACKEND_DIR"
+PYTHON_BIN='.venv/bin/python'
+if [ ! -x "$PYTHON_BIN" ]; then
+    echo '[deploy][ERROR] 无法检查交易任务状态：当前后端虚拟环境不存在或不可执行。' >&2
+    echo '[deploy][ERROR] 为避免中断可能正在运行的任务，本次部署中止。' >&2
+    exit 3
+fi
+
+"$PYTHON_BIN" - <<'PY'
+import sys
+
+from sqlalchemy import inspect, text
+
+from aitrade.config.config_file import Config
+from aitrade.db.session import get_engine
+
+active_statuses = ('starting', 'running', 'stop_requested')
+
+try:
+    config = Config('./config.yaml', mode='web')
+    engine = get_engine(config.trade_persistence_config['database_url'])
+    with engine.connect() as connection:
+        if 'trade_task_runtime' not in inspect(connection).get_table_names():
+            print('[deploy] 未发现交易任务运行态表，跳过交易任务检查。')
+            sys.exit(0)
+        rows = connection.execute(
+            text(
+                """
+                SELECT runner_name, run_id, profile_name, symbol, timeframe, status, updated_at, next_run_at
+                FROM trade_task_runtime
+                WHERE status IN (:starting, :running, :stop_requested)
+                ORDER BY runner_name ASC
+                """
+            ),
+            {
+                'starting': active_statuses[0],
+                'running': active_statuses[1],
+                'stop_requested': active_statuses[2],
+            },
+        ).mappings().all()
+except Exception as exc:
+    print(f'[deploy][ERROR] 无法确认交易任务状态：{exc}', file=sys.stderr)
+    print('[deploy][ERROR] 为避免中断可能正在运行的任务，本次部署中止。', file=sys.stderr)
+    sys.exit(3)
+
+if not rows:
+    print('[deploy] 未发现活跃交易任务，可以继续后端部署。')
+    sys.exit(0)
+
+print('[deploy][ERROR] 检测到活跃交易任务，已中止后端部署。', file=sys.stderr)
+print('[deploy][ERROR] 请先在管理台停止任务，确认状态为 stopped 后再重新部署。', file=sys.stderr)
+print('[deploy][ERROR] 如确认必须强制重启，可设置 AITRADE_DEPLOY_ALLOW_ACTIVE_TASKS=1。', file=sys.stderr)
+for row in rows:
+    print(
+        '[deploy][ERROR] '
+        f"runner={row['runner_name']} run_id={row['run_id'] or ''} "
+        f"profile={row['profile_name'] or ''} symbol={row['symbol'] or ''} "
+        f"timeframe={row['timeframe'] or ''} status={row['status']} "
+        f"updated_at={row['updated_at'] or ''} next_run_at={row['next_run_at'] or ''}",
+        file=sys.stderr,
+    )
+sys.exit(2)
+PY
+EOF
+}
+
 stop_current_backend() {
     log '在远端停止当前 Web 服务'
     ssh "$SSH_ALIAS" "set -euo pipefail; if [ -L '$REMOTE_CURRENT_LINK' ] && [ -d '$REMOTE_CURRENT_LINK/aitrade-be' ]; then cd '$REMOTE_CURRENT_LINK/aitrade-be'; bash stop-web.sh || true; else echo '[deploy] 当前未发现可停止的 current Web 目录'; fi"
@@ -377,6 +464,7 @@ if [ "$MODE" = 'all' ] || [ "$MODE" = 'frontend' ]; then
 fi
 
 if [ "$MODE" = 'all' ] || [ "$MODE" = 'backend' ]; then
+    guard_no_active_trade_tasks_remote
     stop_current_backend
     restart_backend_remote
     verify_backend_remote

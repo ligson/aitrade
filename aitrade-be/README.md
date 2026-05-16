@@ -92,7 +92,8 @@ bash stop-web.sh
 
 ### `bash stop-web.sh`
 
-- 优先优雅停止
+- 优先优雅停止，Web 关闭生命周期会通知当前进程内的交易任务协作式停止
+- 默认宽限期为 120 秒，可通过 `AITRADE_WEB_STOP_TIMEOUT` 覆盖
 - 超时后自动强制停止
 - 已停止或运行态陈旧时会做幂等清理
 
@@ -106,6 +107,8 @@ bash stop-web.sh
 - `spot_multi_signal_fusion`：现货多源融合策略，可选择已有 K 线策略档案、内建技术面节点和独立信号源档案参与融合
 
 这些策略不再通过 `config.yaml` 直接切换运行，而是通过策略配置页、任务配置页与运行快照驱动。
+
+后端部署前会检查是否存在 `starting / running / stop_requested` 的活跃交易任务；如存在，部署脚本会默认中止，避免重启 Web 时中断任务线程并留下 `stale` 运行态。推荐先在管理台停止任务并确认状态为 `stopped` 后再部署；如确需强制重启，可设置 `AITRADE_DEPLOY_ALLOW_ACTIVE_TASKS=1`，但需要接受任务线程被中断和状态残留的风险。
 
 ## 交易记录持久化
 

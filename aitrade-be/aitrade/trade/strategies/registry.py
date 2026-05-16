@@ -8,6 +8,52 @@ from ...config.config_file import DEFAULT_GPT_STRATEGY_CONFIG
 from .fusion_profile import DEFAULT_SPOT_MULTI_SIGNAL_FUSION_PROFILE_CONFIG
 
 
+_TREND_BREAKOUT_DEFAULT_PROFILES: list[dict[str, Any]] = [
+    {
+        'name': 'BTC 现货趋势突破策略',
+        'description': '稳健版：延续当前线上默认参数，等 4h 趋势确认后再入场。',
+        'enabled': False,
+        'params': dict(DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG),
+    },
+    {
+        'name': 'BTC 现货趋势突破-平衡版',
+        'description': '平衡版：降低 EMA 过滤滞后，兼顾趋势确认与启动速度。',
+        'enabled': False,
+        'params': {
+            'ema_fast_period': 8,
+            'ema_slow_period': 21,
+            'adx_period': 14,
+            'adx_threshold': 22,
+            'breakout_lookback': 16,
+            'volume_ma_period': 20,
+            'volume_multiplier': 1.0,
+            'atr_period': 14,
+            'atr_stop_mult': 2.2,
+            'atr_trail_mult': 3.2,
+            'default_risk_per_trade': 0.008,
+        },
+    },
+    {
+        'name': 'BTC 现货趋势突破-激进版',
+        'description': '激进版：更早捕捉趋势启动，但会接受更多假突破。',
+        'enabled': False,
+        'params': {
+            'ema_fast_period': 5,
+            'ema_slow_period': 20,
+            'adx_period': 14,
+            'adx_threshold': 20,
+            'breakout_lookback': 12,
+            'volume_ma_period': 20,
+            'volume_multiplier': 0.9,
+            'atr_period': 14,
+            'atr_stop_mult': 2.5,
+            'atr_trail_mult': 3.5,
+            'default_risk_per_trade': 0.005,
+        },
+    },
+]
+
+
 _STRATEGY_DEFINITIONS: list[dict[str, Any]] = [
     {
         'strategyType': 'gpt',
@@ -79,6 +125,7 @@ _STRATEGY_DEFINITIONS: list[dict[str, Any]] = [
         'supportsBacktest': True,
         'fixedConstraints': ['task_timeframe=1h', 'requires_context=4h'],
         'defaultParams': dict(DEFAULT_BTC_SPOT_TREND_BREAKOUT_CONFIG),
+        'defaultProfiles': [dict(profile) for profile in _TREND_BREAKOUT_DEFAULT_PROFILES],
         'paramSchema': [
             {'field': 'ema_fast_period', 'label': '趋势快 EMA 周期', 'type': 'integer', 'required': True, 'min': 1},
             {'field': 'ema_slow_period', 'label': '趋势慢 EMA 周期', 'type': 'integer', 'required': True, 'min': 2},
@@ -116,6 +163,18 @@ _STRATEGY_DEFINITIONS: list[dict[str, Any]] = [
 _definitions_by_type = {item['strategyType']: item for item in _STRATEGY_DEFINITIONS}
 
 
+def _copy_default_profiles(item: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            'name': profile['name'],
+            'description': profile.get('description', item['description']),
+            'enabled': bool(profile.get('enabled', item['strategyType'] == 'gpt')),
+            'params': dict(profile.get('params') or item['defaultParams']),
+        }
+        for profile in item.get('defaultProfiles') or []
+    ]
+
+
 def list_strategy_definitions() -> list[dict[str, Any]]:
     return [
         {
@@ -133,6 +192,7 @@ def list_strategy_definitions() -> list[dict[str, Any]]:
             'supportsPaper': bool(item.get('supportsPaper', True)),
             'supportsBacktest': bool(item.get('supportsBacktest', item.get('backtestSupported', False))),
             'fixedConstraints': list(item.get('fixedConstraints') or []),
+            'defaultProfiles': _copy_default_profiles(item),
         }
         for item in _STRATEGY_DEFINITIONS
     ]
@@ -157,4 +217,5 @@ def get_strategy_definition(strategy_type: str) -> dict[str, Any]:
         'supportsPaper': bool(item.get('supportsPaper', True)),
         'supportsBacktest': bool(item.get('supportsBacktest', item.get('backtestSupported', False))),
         'fixedConstraints': list(item.get('fixedConstraints') or []),
+        'defaultProfiles': _copy_default_profiles(item),
     }

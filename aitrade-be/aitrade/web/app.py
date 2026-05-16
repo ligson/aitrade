@@ -1,3 +1,4 @@
+import logging
 import traceback
 from http import HTTPStatus
 
@@ -46,6 +47,16 @@ def create_app(config: Config) -> FastAPI:
     @app.post('/health')
     async def health_post():
         return success_response({'status': 'ok'})
+
+    @app.on_event('shutdown')
+    async def shutdown_trade_tasks():
+        logging.info('Web 服务关闭前开始停止交易任务')
+        try:
+            app.state.trade_task_service.shutdown_all(timeout_seconds=120, reason='web_shutdown')
+        except Exception:
+            logging.exception('Web 服务关闭前停止交易任务失败')
+        else:
+            logging.info('Web 服务关闭前交易任务停止流程完成')
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_: Request, exc: ApiError):

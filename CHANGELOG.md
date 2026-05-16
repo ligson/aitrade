@@ -2,6 +2,19 @@
 
 所有有意义的仓库变更都应记录在这里。
 
+## 2026-05-16
+
+- 增强交易任务停服与部署保护：Web 关闭生命周期会通知进程内交易任务协作式停止，`stop-web.sh` 默认等待 120 秒并支持 `AITRADE_WEB_STOP_TIMEOUT` 覆盖；后端部署前会检查活跃交易任务并默认中止，避免发布重启误杀任务线程后产生 `stale` 状态，确需强制重启时可显式设置 `AITRADE_DEPLOY_ALLOW_ACTIVE_TASKS=1`。
+
+## 2026-05-15
+
+- 为 `btc_spot_trend_breakout` 补充三套默认策略档案：稳健、平衡、激进三组参数现在都能从策略注册表和默认补种逻辑中生成，线上已有的 `BTC 现货趋势突破策略` 会继续作为稳健版保留，不会被重复覆盖。
+- 默认策略补种逻辑升级为按 `strategy_type + name` 识别多档案，只做缺失项插入，避免同一策略类型在同一用户下被重复补成多条相同默认档案。
+
+## 2026-05-13
+
+- 修复前端弹框默认按钮文案仍显示英文的问题：应用根组件统一接入 Ant Design Vue 中文 locale，未单独配置文案的确认、取消按钮现在默认展示为中文。
+
 ## 2026-05-09
 
 - 修复任务运行态对 GPT 凭证的误判：`Config` 现在仅在启动 `gpt` 策略时强制校验 `app.gpt.api_key` 非空；`btc_spot_breakout`、`btc_spot_trend_breakout` 与 `spot_multi_signal_fusion` 等规则/融合策略在 `paper`、`sandbox`、`live` 任务运行时不再被错误拦截。

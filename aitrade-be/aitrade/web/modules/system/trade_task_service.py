@@ -7,6 +7,7 @@ from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
 from threading import Event
+from time import monotonic
 from threading import Lock
 from threading import Thread
 from typing import Any
@@ -659,6 +660,64 @@ class TradeTaskService:
             stop_event.set()
             return self._wrap_status_payload(self._serialize_runtime(model), runner_name=normalized_runner_name)
 
+    def shutdown_all(self, timeout_seconds: int = 120, reason: str = 'web_shutdown') -> None:
+        try:
+            timeout = max(0, int(timeout_seconds))
+        except (TypeError, ValueError):
+            timeout = 120
+        active_threads: list[tuple[str, int | None, Thread]] = []
+        now = self._now_iso()
+
+        with self._lock:
+            for runner_name, thread in list(self._threads.items()):
+                if thread is None or not thread.is_alive():
+                    continue
+                model = self._get_or_create_runtime(runner_name)
+                logging.info('Web 服务关闭，通知交易任务停止: runner_name=%s run_id=%s status=%s reason=%s', runner_name, model.run_id, model.status, reason)
+                model.status = STATUS_STOP_REQUESTED
+                model.stop_requested_at = now
+                model.next_run_at = None
+                model.updated_at = now
+                self._save_runtime(model)
+                if model.run_id:
+                    self._update_run_status(model.run_id, status=STATUS_STOP_REQUESTED, stop_requested_at=now)
+                self._append_log(
+                    owner_user_id=model.owner_user_id,
+                    runner_name=runner_name,
+                    run_id=model.run_id,
+                    event_type='shutdown_stop_requested',
+                    status=model.status,
+                    message='Web 服务关闭，通知交易任务停止',
+                    detail={
+                        'stopRequestedAt': now,
+                        'reason': reason,
+                    },
+                )
+                stop_event = self._stop_events.get(runner_name)
+                if stop_event is None:
+                    stop_event = Event()
+                    self._stop_events[runner_name] = stop_event
+                stop_event.set()
+                active_threads.append((runner_name, model.run_id, thread))
+
+        if not active_threads:
+            logging.info('Web 服务关闭时没有活跃交易任务线程')
+            return
+
+        deadline = monotonic() + timeout
+        still_alive: list[tuple[str, int | None]] = []
+        for runner_name, run_id, thread in active_threads:
+            remaining = max(0.0, deadline - monotonic())
+            if remaining > 0 and thread.is_alive():
+                thread.join(remaining)
+            if thread.is_alive():
+                still_alive.append((runner_name, run_id))
+
+        if still_alive:
+            logging.warning('Web 服务关闭等待交易任务超时: timeout_seconds=%s tasks=%s', timeout, still_alive)
+        else:
+            logging.info('Web 服务关闭前交易任务已全部停止: count=%s', len(active_threads))
+
     def _create_run_snapshot(self, trade_task_profile_id: int, current_user: dict[str, Any]) -> dict[str, Any]:
         # run snapshot 会在启动前固化 profile、策略参数和任务级输入，
         # 后续 profile 或系统设置再变更时，当前 run 仍按启动瞬间的快照继续执行。
@@ -1254,7 +1313,7 @@ class TradeTaskService:
         model.status = STATUS_STALE
         model.stopped_at = now
         model.next_run_at = None
-        model.last_error = model.last_error or '检测到交易任务状态残留，当前 Web 进程内没有活动任务线程'
+        model.last_error = model.last_error or '检测到交易任务状态残留，可能是上次 Web 进程异常退出或被强制停止，当前 Web 进程内没有活动任务线程'
         model.updated_at = now
         self._save_runtime(model)
         if model.run_id:

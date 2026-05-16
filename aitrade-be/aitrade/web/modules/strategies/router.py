@@ -177,31 +177,55 @@ def _ensure_default_profiles(database_url: str, owner_user_id: int):
     definitions = list_strategy_definitions()
     with session_factory() as session:
         for item in definitions:
-            exists = session.query(StrategyProfileModel).filter(
-                StrategyProfileModel.owner_user_id == owner_user_id,
-                StrategyProfileModel.strategy_type == item['strategyType'],
-            ).first()
-            if exists is not None:
-                continue
-            try:
-                default_params = normalize_strategy_params(item, item['defaultParams'])
-            except Exception as exc:
-                logger.warning('跳过自动补种默认策略配置：owner_user_id=%s strategy_type=%s error=%s', owner_user_id, item['strategyType'], exc)
-                continue
-            now = datetime.now(timezone.utc).isoformat()
-            session.add(
-                StrategyProfileModel(
-                    owner_user_id=owner_user_id,
-                    strategy_type=item['strategyType'],
-                    name=item['displayName'],
-                    description=item['description'],
-                    enabled=item['strategyType'] == 'gpt',
-                    params_json=json.dumps(default_params, ensure_ascii=False),
-                    schema_version=item['schemaVersion'],
-                    created_at=now,
-                    updated_at=now,
+            seed_profiles = list(item.get('defaultProfiles') or [])
+            if not seed_profiles:
+                seed_profiles = [
+                    {
+                        'name': item['displayName'],
+                        'description': item['description'],
+                        'enabled': item['strategyType'] == 'gpt',
+                        'params': item['defaultParams'],
+                    }
+                ]
+                check_by_name = False
+            else:
+                check_by_name = True
+
+            for seed_profile in seed_profiles:
+                query = session.query(StrategyProfileModel).filter(
+                    StrategyProfileModel.owner_user_id == owner_user_id,
+                    StrategyProfileModel.strategy_type == item['strategyType'],
                 )
-            )
+                if check_by_name:
+                    query = query.filter(StrategyProfileModel.name == seed_profile['name'])
+                exists = query.first()
+                if exists is not None:
+                    continue
+                try:
+                    default_params = normalize_strategy_params(item, seed_profile.get('params') or item['defaultParams'])
+                except Exception as exc:
+                    logger.warning(
+                        '跳过自动补种默认策略配置：owner_user_id=%s strategy_type=%s name=%s error=%s',
+                        owner_user_id,
+                        item['strategyType'],
+                        seed_profile['name'],
+                        exc,
+                    )
+                    continue
+                now = datetime.now(timezone.utc).isoformat()
+                session.add(
+                    StrategyProfileModel(
+                        owner_user_id=owner_user_id,
+                        strategy_type=item['strategyType'],
+                        name=seed_profile['name'],
+                        description=seed_profile.get('description') or item['description'],
+                        enabled=bool(seed_profile.get('enabled', item['strategyType'] == 'gpt')),
+                        params_json=json.dumps(default_params, ensure_ascii=False),
+                        schema_version=item['schemaVersion'],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
         session.commit()
 
 
